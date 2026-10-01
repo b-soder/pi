@@ -1297,9 +1297,9 @@ export class Editor implements Component, Focusable {
 		// Split into lines to check for large paste
 		const pastedLines = filteredText.split("\n");
 
-		// Check if this is a large paste (> 10 lines or > 1000 characters)
+		// Check if this is a large paste (> 100 lines or > 10000 characters)
 		const totalChars = filteredText.length;
-		if (pastedLines.length > 10 || totalChars > 1000) {
+		if (pastedLines.length > 100 || totalChars > 10000) {
 			// Store the paste and insert a marker
 			this.pasteCounter++;
 			const pasteId = this.pasteCounter;
