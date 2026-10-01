@@ -447,9 +447,17 @@ describe("InteractiveMode.createBaseAutocompleteProvider", () => {
 			signal: new AbortController().signal,
 		});
 
-		expect(suggestions?.items.map((item) => item.value)).toEqual([
-			"openai-codex/gpt-5.5",
-			"github-copilot/gpt-5.2-codex",
+		expect(suggestions?.items).toEqual([
+			{
+				value: "openai-codex/gpt-5.5",
+				label: "GPT-5.5",
+				description: "openai-codex",
+			},
+			{
+				value: "github-copilot/gpt-5.2-codex",
+				label: "GPT-5.2 Codex",
+				description: "github-copilot",
+			},
 		]);
 	});
 
