@@ -324,7 +324,8 @@ export class ModelSelectorComponent extends Container implements Focusable {
 
 			const cursor = isSelected ? theme.fg("accent", "→ ") : "  ";
 			const currentMarker = isCurrent ? theme.fg("accent", "✓ ") : "  ";
-			const modelText = isSelected ? theme.fg("accent", item.id) : item.id;
+			const modelName = item.model.name || item.id;
+			const modelText = isSelected ? theme.fg("accent", modelName) : modelName;
 			const providerBadge = theme.fg("muted", `[${item.provider}]`);
 			const line = `${cursor}${currentMarker}${modelText} ${providerBadge}${defaultBadge}`;
 

@@ -17,6 +17,7 @@ type AssistantUsage = {
 function createSession(options: {
 	sessionName: string;
 	modelId?: string;
+	modelName?: string;
 	provider?: string;
 	reasoning?: boolean;
 	thinkingLevel?: string;
@@ -68,6 +69,7 @@ function createSession(options: {
 		state: {
 			model: {
 				id: options.modelId ?? "test-model",
+				name: options.modelName ?? "",
 				provider: options.provider ?? "test",
 				contextWindow: 200_000,
 				reasoning: options.reasoning ?? false,
@@ -120,6 +122,20 @@ describe("formatCwdForFooter", () => {
 describe("FooterComponent width handling", () => {
 	beforeAll(() => {
 		initTheme(undefined, false);
+	});
+
+	it("shows the model name in the footer instead of its ID", () => {
+		const session = createSession({
+			sessionName: "",
+			modelId: "model-uuid",
+			modelName: "Human-readable model name",
+			provider: "ntthai",
+		});
+		const footer = new FooterComponent(session, createFooterData(2));
+		const statsLine = stripAnsi(footer.render(120)[1]);
+
+		expect(statsLine).toContain("(ntthai) Human-readable model name");
+		expect(statsLine).not.toContain("model-uuid");
 	});
 
 	it("keeps all lines within width for wide session names", () => {

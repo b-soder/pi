@@ -26,6 +26,29 @@ describe("model selector", () => {
 		harness = undefined;
 	});
 
+	it("shows model names in the list and keeps IDs as fallback", async () => {
+		harness = await createHarness({
+			models: [
+				{ id: "model-id", name: "Human-readable model name", reasoning: true },
+				{ id: "unnamed-model", name: "", reasoning: true },
+			],
+		});
+		const selector = new ModelSelectorComponent(
+			createFakeTui(),
+			undefined,
+			harness.session.modelRuntime,
+			[],
+			() => {},
+			() => {},
+		);
+		const rendered = stripAnsi(selector.render(120).join("\n"));
+
+		expect(rendered).toContain("Human-readable model name [");
+		expect(rendered).not.toContain("model-id [");
+		expect(rendered).toContain("unnamed-model [");
+		selector.dispose();
+	});
+
 	it("keeps the current model marked while browsing", async () => {
 		harness = await createHarness({
 			models: [
@@ -43,16 +66,16 @@ describe("model selector", () => {
 			() => {},
 		);
 
-		const getModelRow = (id: string): string | undefined =>
+		const getModelRow = (name: string): string | undefined =>
 			stripAnsi(selector.render(120).join("\n"))
 				.split("\n")
-				.find((line) => line.includes(`${id} [`))
+				.find((line) => line.includes(`${name} [`))
 				?.trimEnd();
 
-		expect(getModelRow("current-model")).toBe(`→ ✓ current-model [${currentModel.provider}]`);
+		expect(getModelRow("Current Model")).toBe(`→ ✓ Current Model [${currentModel.provider}]`);
 		selector.handleInput("\x1b[B");
-		expect(getModelRow("current-model")).toBe(`  ✓ current-model [${currentModel.provider}]`);
-		expect(getModelRow("browsed-model")).toBe(`→   browsed-model [${currentModel.provider}]`);
+		expect(getModelRow("Current Model")).toBe(`  ✓ Current Model [${currentModel.provider}]`);
+		expect(getModelRow("Browsed Model")).toBe(`→   Browsed Model [${currentModel.provider}]`);
 		selector.dispose();
 	});
 
