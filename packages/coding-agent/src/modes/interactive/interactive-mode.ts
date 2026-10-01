@@ -743,7 +743,7 @@ export class InteractiveMode {
 
 				return createFuzzyAutocompleteItems(items, prefix, getModelSearchText, (item) => ({
 					value: item.label,
-					label: item.id,
+					label: item.name || item.id,
 					description: item.provider,
 				}));
 			};
