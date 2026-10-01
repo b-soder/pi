@@ -3801,15 +3801,15 @@ describe("Editor component", () => {
 	describe("Paste marker atomic behavior", () => {
 		/** Helper: simulate a large paste that creates a marker */
 		function pasteWithMarker(editor: Editor): string {
-			const bigContent = "line\n".repeat(20).trimEnd(); // 20 lines
+			const bigContent = "line\n".repeat(120).trimEnd(); // 120 lines
 			editor.handleInput(`\x1b[200~${bigContent}\x1b[201~`);
-			// The editor replaces large pastes with a marker like "[paste #1 +20 lines]"
+			// The editor replaces large pastes with a marker like "[paste #1 +120 lines]"
 			return editor.getText();
 		}
 
-		/** Helper: 12-line paste content with a distinguishing tag */
+		/** Helper: 120-line paste content with a distinguishing tag */
 		function bigPaste(tag: string): string {
-			return Array.from({ length: 12 }, (_, i) => `${tag}${i}`).join("\n");
+			return Array.from({ length: 120 }, (_, i) => `${tag}${i}`).join("\n");
 		}
 
 		it("creates a paste marker for large pastes", () => {
@@ -4064,10 +4064,10 @@ describe("Editor component", () => {
 		});
 
 		it("does not crash when paste marker is wider than terminal width", () => {
-			// Reproduce: terminal width 8, paste marker "[paste #1 +47 lines]" (21 chars)
+			// Reproduce: terminal width 8, paste marker "[paste #1 +120 lines]" (22 chars)
 			const tui = createTestTUI();
 			const editor = new Editor(tui, defaultEditorTheme);
-			const bigContent = "line\n".repeat(47).trimEnd();
+			const bigContent = "line\n".repeat(120).trimEnd();
 			editor.handleInput(`\x1b[200~${bigContent}\x1b[201~`);
 
 			const text = editor.getText();
@@ -4087,7 +4087,7 @@ describe("Editor component", () => {
 		});
 
 		it("does not crash when text + paste marker exceeds terminal width with cursor on marker", () => {
-			// Reproduce: terminal width 54, text "b".repeat(35) + "[paste #1 +27 lines]" + "bbbb"
+			// Reproduce: terminal width 54, text "b".repeat(35) + "[paste #1 +120 lines]" + "bbbb"
 			// Cursor lands on the paste marker after word-wrap, causing the rendered line
 			// to be 55 visible chars (1 over the width).
 			const tui = createTestTUI();
@@ -4096,8 +4096,8 @@ describe("Editor component", () => {
 			// Type 35 'b' characters
 			for (let i = 0; i < 35; i++) editor.handleInput("b");
 
-			// Paste 27 lines
-			const bigContent = "line\n".repeat(27).trimEnd();
+			// Paste 120 lines
+			const bigContent = "line\n".repeat(120).trimEnd();
 			editor.handleInput(`\x1b[200~${bigContent}\x1b[201~`);
 
 			// Type a few more characters
@@ -4132,8 +4132,8 @@ describe("Editor component", () => {
 			editor.handleInput(" ");
 			for (let i = 0; i < 35; i++) editor.handleInput("b");
 
-			// Paste 27 lines to create marker
-			const bigContent = "line\n".repeat(27).trimEnd();
+			// Paste 120 lines to create marker
+			const bigContent = "line\n".repeat(120).trimEnd();
 			editor.handleInput(`\x1b[200~${bigContent}\x1b[201~`);
 
 			// Type trailing chars
@@ -4153,16 +4153,7 @@ describe("Editor component", () => {
 		it("expands large pasted content literally in getExpandedText", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			const pastedText = [
-				"line 1",
-				"line 2",
-				"line 3",
-				"line 4",
-				"line 5",
-				"line 6",
-				"line 7",
-				"line 8",
-				"line 9",
-				"line 10",
+				...Array.from({ length: 101 }, (_, i) => `line ${i + 1}`),
 				"tokens $1 $2 $& $$ $` $' end",
 			].join("\n");
 
@@ -4179,7 +4170,7 @@ describe("Editor component", () => {
 			editor.setText("12345678901234567890\n\nhello ");
 
 			// Create a large paste to get a marker
-			const bigContent = "x".repeat(2000);
+			const bigContent = "x".repeat(12000);
 			editor.handleInput(`\x1b[200~${bigContent}\x1b[201~`);
 			editor.render(80);
 
@@ -4187,7 +4178,7 @@ describe("Editor component", () => {
 			const _marker = text.match(/\[paste #\d+ \d+ chars\]/)![0];
 			// Line 0: "12345678901234567890"
 			// Line 1: "" (empty)
-			// Line 2: "hello [paste #1 2000 chars]"
+			// Line 2: "hello [paste #1 12000 chars]"
 			//         marker starts at col 6
 
 			// Navigate to line 0, col 10
@@ -4214,13 +4205,13 @@ describe("Editor component", () => {
 			// Build:
 			// Line 0: "1234567890123456" (16 chars)
 			// Line 1: "" (empty)
-			// Line 2: "[paste #1 2000 chars]" (22 chars, paste marker)
+			// Line 2: "[paste #1 12000 chars]" (23 chars, paste marker)
 			// Line 3: "" (empty)
 			// Line 4: "abcdefghijklmnop" (16 chars)
 			for (const ch of "1234567890123456") editor.handleInput(ch);
 			editor.handleInput("\n");
 			editor.handleInput("\n");
-			editor.handleInput(`\x1b[200~${"x".repeat(2000)}\x1b[201~`);
+			editor.handleInput(`\x1b[200~${"x".repeat(12000)}\x1b[201~`);
 			editor.handleInput("\n");
 			editor.handleInput("\n");
 			for (const ch of "abcdefghijklmnop") editor.handleInput(ch);
@@ -4254,21 +4245,21 @@ describe("Editor component", () => {
 			const editor = new Editor(tui, defaultEditorTheme);
 
 			// Build:
-			// Logical line 0: "abcdefgh" + marker(21 chars) + "ijklmnopqr"
+			// Logical line 0: "abcdefgh" + marker(22 chars) + "ijklmnopqr"
 			// Logical line 1: "123456789012345678"
 			//
-			// Marker "[paste #1 +100 lines]" (21 chars) is wider than the
+			// Marker "[paste #1 +120 lines]" (22 chars) is wider than the
 			// terminal (20). Word-wrap splits at the space before "lines",
 			// producing:
 			//   VL1: abcdefgh              (startCol 0,  len 8)
-			//   VL2: [paste #1 +100        (startCol 8,  len 15) <- marker head
+			//   VL2: [paste #1 +120        (startCol 8,  len 15) <- marker head
 			//   VL3: lines]ijklmnopqr      (startCol 23, len 16) <- marker tail + content
 			//   VL4: 123456789012345678    (line 1)
 			//
 			// On VL3 the marker tail "lines]" occupies visual cols 0-5.
 			// Content ("i") starts at visual col 6 = logical col 29.
 			for (const ch of "abcdefgh") editor.handleInput(ch);
-			const bigContent = "line\n".repeat(100).trimEnd();
+			const bigContent = "line\n".repeat(120).trimEnd();
 			editor.handleInput(`\x1b[200~${bigContent}\x1b[201~`);
 			for (const ch of "ijklmnopqr") editor.handleInput(ch);
 			editor.handleInput("\n");
@@ -4319,11 +4310,11 @@ describe("Editor component", () => {
 			// moveToVisualLine detects the continuation VL and skips to VL4
 			// (line 1).
 			//   VL1: abcdefgh              (startCol 0,  len 8)
-			//   VL2: [paste #1 +100        (startCol 8,  len 15) <- marker head
+			//   VL2: [paste #1 +120        (startCol 8,  len 15) <- marker head
 			//   VL3: lines]ijklmnopqr      (startCol 23, len 16) <- marker tail + content
 			//   VL4: 123456789012345678    (line 1)
 			for (const ch of "abcdefgh") editor.handleInput(ch);
-			const bigContent = "line\n".repeat(100).trimEnd();
+			const bigContent = "line\n".repeat(120).trimEnd();
 			editor.handleInput(`\x1b[200~${bigContent}\x1b[201~`);
 			for (const ch of "ijklmnopqr") editor.handleInput(ch);
 			editor.handleInput("\n");
