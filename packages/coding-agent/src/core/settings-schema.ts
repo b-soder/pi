@@ -416,6 +416,12 @@ export const SettingsSchema = Type.Object(
 				default: SETTINGS_DEFAULTS.tuiMode,
 			}),
 		),
+		experimentalTuiLayout: Type.Optional(
+			Type.Union([Type.Literal("standard"), Type.Literal("four-panel")], {
+				description: "Experimental fullscreen layout.",
+				default: SETTINGS_DEFAULTS.experimentalTuiLayout,
+			}),
+		),
 		fullscreenExitOutput: Type.Optional(
 			Type.Union([Type.Literal("transcript"), Type.Literal("resume-hint")], {
 				description: "No effect in regular TUI mode.",

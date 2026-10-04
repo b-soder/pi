@@ -315,6 +315,7 @@ export class Editor implements Component, Focusable {
 
 	// Vertical scrolling support
 	private scrollOffset: number = 0;
+	private panelBordersHidden = false;
 
 	// Border color (can be changed dynamically)
 	public borderColor: (str: string) => string;
@@ -518,6 +519,12 @@ export class Editor implements Component, Focusable {
 		return this.borderColor(border);
 	}
 
+	setPanelBordersHidden(hidden: boolean): void {
+		if (this.panelBordersHidden === hidden) return;
+		this.panelBordersHidden = hidden;
+		this.invalidate();
+	}
+
 	render(width: number): string[] {
 		const maxPadding = Math.max(0, Math.floor((width - 1) / 2));
 		const paddingX = Math.min(this.paddingX, maxPadding);
@@ -560,8 +567,8 @@ export class Editor implements Component, Focusable {
 		const leftPadding = " ".repeat(paddingX);
 		const rightPadding = leftPadding;
 
-		// Render top border (with scroll indicator if scrolled down)
-		result.push(this.renderTopBorder(width, this.scrollOffset));
+		// In panel layouts, surrounding separators are the input area's borders.
+		if (!this.panelBordersHidden) result.push(this.renderTopBorder(width, this.scrollOffset));
 
 		// Render each visible layout line
 		// Emit hardware cursor marker when focused so TUI can position the
@@ -613,7 +620,7 @@ export class Editor implements Component, Focusable {
 
 		// Render bottom border (with scroll indicator if more content below)
 		const linesBelow = layoutLines.length - (this.scrollOffset + visibleLines.length);
-		result.push(this.renderBottomBorder(width, linesBelow));
+		if (!this.panelBordersHidden) result.push(this.renderBottomBorder(width, linesBelow));
 
 		// Add autocomplete list if active
 		this.renderedAutocompleteHeight = 0;
@@ -631,7 +638,7 @@ export class Editor implements Component, Focusable {
 	}
 
 	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
-		const autocompleteStartRow = this.renderedVisibleLineCount + 2;
+		const autocompleteStartRow = this.renderedVisibleLineCount + (this.panelBordersHidden ? 0 : 2);
 		if (
 			this.autocompleteState &&
 			this.autocompleteList &&

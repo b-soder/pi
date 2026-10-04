@@ -703,6 +703,23 @@ describe("Editor component", () => {
 		});
 	});
 
+	describe("Panel mode", () => {
+		it("omits the editor's top and bottom border rows", () => {
+			const width = 20;
+			const editor = new Editor(createTestTUI(width), defaultEditorTheme);
+			const standardLines = editor.render(width);
+
+			editor.setPanelBordersHidden(true);
+			const panelLines = editor.render(width);
+
+			assert.strictEqual(panelLines.length, standardLines.length - 2);
+			assert.strictEqual(stripVTControlCharacters(panelLines[0]!).includes("─"), false);
+
+			editor.setText("first line\nsecond line");
+			assert.strictEqual(editor.render(width).length, 2);
+		});
+	});
+
 	describe("Scroll indicators", () => {
 		it("centers scroll indicators on wide borders", () => {
 			const width = 40;

@@ -506,6 +506,19 @@ describe("SettingsManager", () => {
 
 			expect(manager.getTuiMode()).toBe("fullscreen");
 		});
+
+		it("defaults the experimental layout and persists four-panel mode", async () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getExperimentalTuiLayout()).toBe("standard");
+
+			manager.setExperimentalTuiLayout("four-panel");
+			await manager.flush();
+
+			expect(manager.getExperimentalTuiLayout()).toBe("four-panel");
+			expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8")).experimentalTuiLayout).toBe(
+				"four-panel",
+			);
+		});
 	});
 
 	it("validates and persists fullscreen settings", async () => {
