@@ -182,6 +182,7 @@ export interface Settings {
 	cacheWarming?: CacheWarmingMode; // default: "streaming"; global only because each refresh costs money
 	websocketConnectTimeoutMs?: number; // WebSocket connect/open handshake timeout in milliseconds; 0 disables it
 	tuiMode?: TuiMode; // default: "fullscreen"
+	experimentalTuiLayout?: "standard" | "four-panel"; // default: "standard"; fullscreen only
 	fullscreenExitOutput?: FullscreenExitOutput; // default: "transcript"; no effect in regular TUI mode
 	fullscreenScrollbar?: ScrollViewScrollbar; // default: "auto"; no effect in regular TUI mode
 	fullscreenCopyOnSelect?: boolean; // default: true; no effect in regular TUI mode
@@ -1347,6 +1348,16 @@ export class SettingsManager {
 
 	getTuiMode(): TuiMode {
 		return this.settings.tuiMode === "regular" ? "regular" : "fullscreen";
+	}
+
+	getExperimentalTuiLayout(): "standard" | "four-panel" {
+		return this.settings.experimentalTuiLayout === "four-panel" ? "four-panel" : "standard";
+	}
+
+	setExperimentalTuiLayout(layout: "standard" | "four-panel"): void {
+		this.globalSettings.experimentalTuiLayout = layout;
+		this.markModified("experimentalTuiLayout");
+		this.save();
 	}
 
 	setTuiMode(mode: TuiMode): void {
