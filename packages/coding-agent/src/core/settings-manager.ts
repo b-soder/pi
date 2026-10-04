@@ -1257,6 +1257,16 @@ export class SettingsManager {
 		return this.settings.tuiMode === "regular" ? "regular" : SETTINGS_DEFAULTS.tuiMode;
 	}
 
+	getExperimentalTuiLayout(): "standard" | "four-panel" {
+		return this.settings.experimentalTuiLayout === "four-panel" ? "four-panel" : "standard";
+	}
+
+	setExperimentalTuiLayout(layout: "standard" | "four-panel"): void {
+		this.globalSettings.experimentalTuiLayout = layout;
+		this.markModified("experimentalTuiLayout");
+		this.save();
+	}
+
 	setTuiMode(mode: TuiMode): void {
 		this.globalSettings.tuiMode = mode;
 		this.markModified("tuiMode");

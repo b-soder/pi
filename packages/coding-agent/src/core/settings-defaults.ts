@@ -60,6 +60,7 @@ export const SETTINGS_DEFAULTS = {
 	},
 	cacheWarming: "streaming",
 	tuiMode: "fullscreen",
+	experimentalTuiLayout: "standard",
 	fullscreenExitOutput: "transcript",
 	fullscreenScrollbar: "auto",
 	fullscreenCopyOnSelect: true,

@@ -50,6 +50,7 @@ import {
 	TuiMainScreen,
 	type TuiMouseEvent,
 	type TuiMouseEventResult,
+	VStack,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import chalk from "chalk";
@@ -455,7 +456,10 @@ export class InteractiveMode {
 	private mainScreenRenderState: TuiMainScreenRenderState | undefined;
 	private loadedResourcesContainer: Container;
 	private chatContainer: Container;
+	private toolOutputContainer: Container;
 	private documentContainer: Container;
+	private toolOutputEnabled = false;
+	private suppressEditorBorders = false;
 	private transcriptScrollView: TuiLayouts.ScrollView | undefined;
 	private fullscreenLayoutRoot: Component | undefined;
 	private pendingMessagesContainer: Container;
@@ -633,6 +637,7 @@ export class InteractiveMode {
 		this.headerContainer = new Container();
 		this.loadedResourcesContainer = new Container();
 		this.chatContainer = new Container();
+		this.toolOutputContainer = new Container();
 		this.documentContainer = new Container();
 		this.documentContainer.addChild(this.headerContainer);
 		this.documentContainer.addChild(this.loadedResourcesContainer);
@@ -964,15 +969,27 @@ export class InteractiveMode {
 		}
 
 		// Keep one component tree and remount it when changing renderers.
-		this.renderWidgets(); // Initialize with default spacer
+		this.toolOutputEnabled =
+			this.options.tuiMode === "fullscreen" && this.settingsManager.getExperimentalTuiLayout() === "four-panel";
+		this.renderWidgets();
+		this.suppressEditorBorders = this.toolOutputEnabled;
+		if (this.suppressEditorBorders) this.defaultEditor.setPanelBordersHidden(true);
 		const viewport = createChatViewport({
 			document: this.documentContainer,
+			toolOutput: this.toolOutputContainer,
+			fourPanel: this.toolOutputEnabled,
+			activity: new VStack([this.widgetContainerAbove, this.widgetContainerBelow]),
+			dividerStatus: (width) =>
+				this.activeStatusIndicator?.renderInBorder(Math.max(1, width)) ||
+				this.activeStatusIndicator?.renderSpinnerInBorder(Math.max(1, width)),
 			pendingMessages: this.pendingMessagesContainer,
 			status: this.statusContainer,
-			widgetsAbove: this.widgetContainerAbove,
+			widgetsAbove: this.toolOutputEnabled ? undefined : this.widgetContainerAbove,
 			editor: this.editorContainer,
-			widgetsBelow: this.widgetContainerBelow,
+			widgetsBelow: this.toolOutputEnabled ? undefined : this.widgetContainerBelow,
 			footer: this.footerContainer,
+			getTerminalRows: () => this.ui.terminal.rows,
+			getTerminalColumns: () => this.ui.terminal.columns,
 			scrollbar: this.settingsManager.getFullscreenScrollbar(),
 			scrollbarTrackStyle: (text) => theme.fg("scrollbarTrack", text),
 			scrollbarThumbStyle: (text) => theme.fg("scrollbarThumb", text),
@@ -982,10 +999,10 @@ export class InteractiveMode {
 		this.mountInteractiveTui(this.renderer, [
 			this.documentContainer,
 			this.pendingMessagesContainer,
-			this.statusContainer,
-			this.widgetContainerAbove,
+			...(this.toolOutputEnabled ? [] : [this.statusContainer]),
+			...(this.toolOutputEnabled ? [] : [this.widgetContainerAbove]),
 			this.editorContainer,
-			this.widgetContainerBelow,
+			...(this.toolOutputEnabled ? [] : [this.widgetContainerBelow]),
 			this.footerContainer,
 		]);
 		// Accept text while startup completes, but only enable interrupt, exit, and submission feedback.
@@ -2010,6 +2027,7 @@ export class InteractiveMode {
 					}
 
 					this.chatContainer.clear();
+					this.toolOutputContainer.clear();
 					this.renderInitialMessages();
 					if (result.editorText && !this.editor.getText().trim()) {
 						this.editor.setText(result.editorText);
@@ -2210,6 +2228,7 @@ export class InteractiveMode {
 	private renderCurrentSessionState(): void {
 		this.loadedResourcesContainer.clear();
 		this.chatContainer.clear();
+		this.toolOutputContainer.clear();
 		this.pendingMessagesContainer.clear();
 		this.compactionQueuedMessages = [];
 		this.streamingComponent = undefined;
@@ -2229,6 +2248,17 @@ export class InteractiveMode {
 		return this.session.extensionRunner.resolveToolRenderers(toolName, () =>
 			withBuiltInRenderers(toolName, this.session.getToolDefinition(toolName)),
 		);
+	}
+
+	private addToolExecutionComponent(component: Component): void {
+		if (!this.toolOutputEnabled) {
+			this.chatContainer.addChild(component);
+			return;
+		}
+		if (this.toolOutputContainer.children.length > 0) {
+			this.toolOutputContainer.addChild(new Spacer(1));
+		}
+		this.toolOutputContainer.addChild(component);
 	}
 
 	private getMarkdownTransformers(): MarkdownTransformer[] {
@@ -2304,7 +2334,7 @@ export class InteractiveMode {
 
 	private setEditorWorkingStatusIndicator(indicator: StatusIndicator | undefined): boolean {
 		this.defaultEditor.setWorkingStatusIndicator(undefined);
-		if (!isEmbeddedStatus(this.editor)) return false;
+		if (this.toolOutputEnabled || !isEmbeddedStatus(this.editor)) return false;
 		this.editor.setWorkingStatusIndicator(indicator);
 		return true;
 	}
@@ -2317,6 +2347,10 @@ export class InteractiveMode {
 		this.setEditorWorkingStatusIndicator(undefined);
 		if (this.setEditorWorkingStatusIndicator(indicator)) {
 			this.activeWorkingIndicatorEmbedded = true;
+			return;
+		}
+		if (this.toolOutputEnabled) {
+			this.ui.requestRender();
 			return;
 		}
 		this.statusContainer.addChild(indicator);
@@ -2333,6 +2367,7 @@ export class InteractiveMode {
 		this.activeWorkingIndicatorEmbedded = false;
 		this.statusContainer.clear();
 		this.setEditorWorkingStatusIndicator(undefined);
+		if (this.toolOutputEnabled) this.ui.requestRender();
 		if (
 			clearedIndicator &&
 			!clearedIndicatorWasEmbedded &&
@@ -2490,7 +2525,12 @@ export class InteractiveMode {
 	 */
 	private renderWidgets(): void {
 		if (!this.widgetContainerAbove || !this.widgetContainerBelow) return;
-		this.renderWidgetContainer(this.widgetContainerAbove, this.extensionWidgetsAbove, true, true);
+		this.renderWidgetContainer(
+			this.widgetContainerAbove,
+			this.extensionWidgetsAbove,
+			!this.toolOutputEnabled,
+			!this.toolOutputEnabled,
+		);
 		this.renderWidgetContainer(this.widgetContainerBelow, this.extensionWidgetsBelow, false, false);
 		this.ui.requestRender();
 	}
@@ -3464,6 +3504,7 @@ export class InteractiveMode {
 					const entries = this.sessionManager.buildContextEntries();
 					if (entries[0]?.id !== event.entry.id) break;
 					this.chatContainer.clear();
+					this.toolOutputContainer.clear();
 					const branch = this.sessionManager.getBranch();
 					const compactionIndex = branch.findIndex((entry) => entry.id === event.entry.id);
 					const entriesAfterCompaction = new Set(branch.slice(compactionIndex + 1).map((entry) => entry.id));
@@ -3516,7 +3557,13 @@ export class InteractiveMode {
 					);
 					this.streamingMessage = event.message;
 					this.chatContainer.addChild(this.streamingComponent);
-					this.streamingComponent.updateContent(this.streamingMessage, true);
+					const conversationMessage = this.toolOutputEnabled
+						? {
+								...this.streamingMessage,
+								content: this.streamingMessage.content.filter((content) => content.type !== "toolCall"),
+							}
+						: this.streamingMessage;
+					this.streamingComponent.updateContent(conversationMessage, true);
 					this.ui.requestRender();
 				}
 				break;
@@ -3524,7 +3571,13 @@ export class InteractiveMode {
 			case "message_update":
 				if (this.streamingComponent && event.message.role === "assistant") {
 					this.streamingMessage = event.message;
-					this.streamingComponent.updateContent(this.streamingMessage, true);
+					const conversationMessage = this.toolOutputEnabled
+						? {
+								...this.streamingMessage,
+								content: this.streamingMessage.content.filter((content) => content.type !== "toolCall"),
+							}
+						: this.streamingMessage;
+					this.streamingComponent.updateContent(conversationMessage, true);
 
 					for (const content of this.streamingMessage.content) {
 						if (content.type === "toolCall") {
@@ -3543,7 +3596,7 @@ export class InteractiveMode {
 									this.sessionManager.getCwd(),
 								);
 								component.setExpanded(this.toolOutputExpanded);
-								this.chatContainer.addChild(component);
+								this.addToolExecutionComponent(component);
 								this.pendingTools.set(content.id, component);
 							} else {
 								const component = this.pendingTools.get(content.id);
@@ -3570,7 +3623,13 @@ export class InteractiveMode {
 								: "Operation aborted";
 						this.streamingMessage.errorMessage = errorMessage;
 					}
-					this.streamingComponent.updateContent(this.streamingMessage, false);
+					const conversationMessage = this.toolOutputEnabled
+						? {
+								...this.streamingMessage,
+								content: this.streamingMessage.content.filter((content) => content.type !== "toolCall"),
+							}
+						: this.streamingMessage;
+					this.streamingComponent.updateContent(conversationMessage, false);
 
 					if (this.streamingMessage.stopReason === "aborted" || this.streamingMessage.stopReason === "error") {
 						if (!errorMessage) {
@@ -3622,7 +3681,7 @@ export class InteractiveMode {
 						this.sessionManager.getCwd(),
 					);
 					component.setExpanded(this.toolOutputExpanded);
-					this.chatContainer.addChild(component);
+					this.addToolExecutionComponent(component);
 					this.pendingTools.set(event.toolCallId, component);
 				}
 				component.markExecutionStarted();
@@ -3710,6 +3769,7 @@ export class InteractiveMode {
 						throw new Error("Completed compaction is missing from the session context");
 					}
 					this.chatContainer.clear();
+					this.toolOutputContainer.clear();
 					// The latest compaction is prepended for model context; append it below at its chronological position.
 					this.renderSessionEntries(entries.slice(1));
 					this.addMessageToChat(
@@ -3895,7 +3955,8 @@ export class InteractiveMode {
 					message.truncated ? ({ truncated: true } as TruncationResult) : undefined,
 					message.fullOutputPath,
 				);
-				this.chatContainer.addChild(component);
+				if (this.toolOutputEnabled) this.addToolExecutionComponent(component);
+				else this.chatContainer.addChild(component);
 				break;
 			}
 			case "custom": {
@@ -4034,7 +4095,20 @@ export class InteractiveMode {
 			const message = item;
 			// Assistant messages need special handling for tool calls
 			if (message.role === "assistant") {
-				this.addMessageToChat(message);
+				if (this.toolOutputEnabled && message.content.some((content) => content.type === "toolCall")) {
+					const conversationContent = message.content.filter((content) => content.type !== "toolCall");
+					if (
+						conversationContent.some(
+							(content) =>
+								(content.type === "text" && content.text.trim()) ||
+								(content.type === "thinking" && content.thinking.trim()),
+						)
+					) {
+						this.addMessageToChat({ ...message, content: conversationContent });
+					}
+				} else {
+					this.addMessageToChat(message);
+				}
 				// Render tool call components
 				for (const content of message.content) {
 					if (content.type === "toolCall") {
@@ -4052,7 +4126,7 @@ export class InteractiveMode {
 							this.sessionManager.getCwd(),
 						);
 						component.setExpanded(this.toolOutputExpanded);
-						this.chatContainer.addChild(component);
+						this.addToolExecutionComponent(component);
 
 						if (message.stopReason === "aborted" || message.stopReason === "error") {
 							let errorMessage: string;
@@ -4271,6 +4345,7 @@ export class InteractiveMode {
 
 	private rebuildChatFromMessages(): void {
 		this.chatContainer.clear();
+		this.toolOutputContainer.clear();
 		this.renderSessionEntries(this.sessionManager.buildContextEntries());
 	}
 
@@ -4578,7 +4653,7 @@ export class InteractiveMode {
 		if (isExpandable(activeHeader)) {
 			activeHeader.setExpanded(expanded);
 		}
-		for (const container of [this.loadedResourcesContainer, this.chatContainer]) {
+		for (const container of [this.loadedResourcesContainer, this.chatContainer, this.toolOutputContainer]) {
 			for (const child of container.children) {
 				if (isExpandable(child)) {
 					child.setExpanded(expanded);
@@ -4590,9 +4665,11 @@ export class InteractiveMode {
 
 	/** Update rendered assistant messages without rebuilding live tool components. */
 	private updateThinkingBlockVisibility(): void {
-		for (const child of this.chatContainer.children) {
-			if (child instanceof AssistantMessageComponent) {
-				child.setHideThinkingBlock(this.hideThinkingBlock);
+		for (const container of [this.chatContainer, this.toolOutputContainer]) {
+			for (const child of container.children) {
+				if (child instanceof AssistantMessageComponent) {
+					child.setHideThinkingBlock(this.hideThinkingBlock);
+				}
 			}
 		}
 		this.ui.requestRender();
@@ -4873,7 +4950,8 @@ export class InteractiveMode {
 	private flushPendingBashComponents(): void {
 		for (const component of this.pendingBashComponents) {
 			this.pendingMessagesContainer.removeChild(component);
-			this.chatContainer.addChild(component);
+			if (this.toolOutputEnabled) this.addToolExecutionComponent(component);
+			else this.chatContainer.addChild(component);
 		}
 		this.pendingBashComponents = [];
 	}
@@ -4963,6 +5041,7 @@ export class InteractiveMode {
 					clearOnShrink: this.settingsManager.getClearOnShrink(),
 					showTerminalProgress: this.settingsManager.getShowTerminalProgress(),
 					tuiMode: this.ui.mode,
+					experimentalTuiLayout: this.settingsManager.getExperimentalTuiLayout(),
 					fullscreenExitOutput: this.settingsManager.getFullscreenExitOutput(),
 					fullscreenScrollbar: this.settingsManager.getFullscreenScrollbar(),
 					fullscreenCopyOnSelect: this.settingsManager.getFullscreenCopyOnSelect(),
@@ -5094,7 +5173,7 @@ export class InteractiveMode {
 					onOutputPadChange: (padding) => {
 						this.settingsManager.setOutputPad(padding);
 						this.outputPad = padding;
-						for (const container of [this.chatContainer, this.pendingMessagesContainer]) {
+						for (const container of [this.chatContainer, this.pendingMessagesContainer, this.toolOutputContainer]) {
 							for (const child of container.children) {
 								if ("setOutputPad" in child && typeof child.setOutputPad === "function") {
 									child.setOutputPad(padding);
@@ -5129,6 +5208,10 @@ export class InteractiveMode {
 						this.settingsManager.setTuiMode(mode);
 						if (!this.activeStatusIndicator) this.statusContainer.clear();
 						this.showStatus(`TUI mode: ${mode}`);
+					},
+					onExperimentalTuiLayoutChange: (layout) => {
+						this.settingsManager.setExperimentalTuiLayout(layout);
+						this.showStatus(`Experimental TUI layout: ${layout}; restart Pi to apply`);
 					},
 					onFullscreenExitOutputChange: (output) => {
 						this.settingsManager.setFullscreenExitOutput(output);
@@ -5679,6 +5762,7 @@ export class InteractiveMode {
 
 						// Update UI
 						this.chatContainer.clear();
+						this.toolOutputContainer.clear();
 						this.renderInitialMessages();
 						if (result.editorText && !this.editor.getText().trim()) {
 							this.editor.setText(result.editorText);
@@ -7024,8 +7108,13 @@ export class InteractiveMode {
 			// Create UI component for display
 			this.bashComponent = new BashExecutionComponent(command, this.ui, excludeFromContext, this.outputPad);
 			if (this.session.isStreaming) {
-				this.pendingMessagesContainer.addChild(this.bashComponent);
-				this.pendingBashComponents.push(this.bashComponent);
+				if (this.toolOutputEnabled) this.addToolExecutionComponent(this.bashComponent);
+				else {
+					this.pendingMessagesContainer.addChild(this.bashComponent);
+					this.pendingBashComponents.push(this.bashComponent);
+				}
+			} else if (this.toolOutputEnabled) {
+				this.addToolExecutionComponent(this.bashComponent);
 			} else {
 				this.chatContainer.addChild(this.bashComponent);
 			}
@@ -7053,11 +7142,15 @@ export class InteractiveMode {
 		this.bashComponent = new BashExecutionComponent(command, this.ui, excludeFromContext, this.outputPad);
 
 		if (isDeferred) {
-			// Show in pending area when agent is streaming
-			this.pendingMessagesContainer.addChild(this.bashComponent);
-			this.pendingBashComponents.push(this.bashComponent);
+			// Show in pending area when agent is streaming, unless tool output has its own panel.
+			if (this.toolOutputEnabled) this.addToolExecutionComponent(this.bashComponent);
+			else {
+				this.pendingMessagesContainer.addChild(this.bashComponent);
+				this.pendingBashComponents.push(this.bashComponent);
+			}
+		} else if (this.toolOutputEnabled) {
+			this.addToolExecutionComponent(this.bashComponent);
 		} else {
-			// Show in chat immediately when agent is idle
 			this.chatContainer.addChild(this.bashComponent);
 		}
 		this.ui.requestRender();
