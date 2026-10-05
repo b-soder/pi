@@ -453,6 +453,16 @@ describe("SessionManager session file creation", () => {
 	});
 
 	// #10000: the first prompt must survive a first turn that never produces an assistant message
+	it("persists a header-only session when an unsent input draft needs to survive resume", async () => {
+		const session = SessionManager.create(tempDir, tempDir);
+		const file = session.getSessionFile()!;
+
+		expect(existsSync(file)).toBe(false);
+		expect(session.ensureSessionFile()).toBe(file);
+		expect(readSessionFileRoles(file)).toEqual(["session"]);
+		await expect(SessionManager.list(tempDir, tempDir)).resolves.toHaveLength(1);
+	});
+
 	it("creates the file when the first user message is appended", () => {
 		const session = SessionManager.create(tempDir, tempDir);
 		session.appendModelChange("anthropic", "claude-sonnet-4-5");
