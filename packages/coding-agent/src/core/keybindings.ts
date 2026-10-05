@@ -20,6 +20,14 @@ export function useWindowsKeybindings(
 	return platform === "win32" || (platform === "linux" && Boolean(env.WSL_DISTRO_NAME || env.WSL_INTEROP));
 }
 
+export function getInputToggleDefaultKeys(isInsideTmux: boolean): KeyId | KeyId[] {
+	return isInsideTmux ? ["super+/", "alt+/"] : "super+/";
+}
+
+declare module "@earendil-works/pi-tui" {
+	interface Keybindings extends AppKeybindings {}
+}
+
 const windowsKeybindings = useWindowsKeybindings();
 
 const APP_KEYBINDINGS = {
@@ -47,6 +55,10 @@ const APP_KEYBINDINGS = {
 		description: "Cycle to previous model",
 	},
 	"app.model.select": { defaultKeys: "ctrl+l", description: "Open model selector" },
+	"app.input.toggle": {
+		defaultKeys: getInputToggleDefaultKeys(Boolean(process.env.TMUX)),
+		description: "Toggle fullscreen input panel",
+	},
 	"app.tools.expand": { defaultKeys: "ctrl+o", description: "Toggle tool output" },
 	"app.thinking.toggle": {
 		defaultKeys: "ctrl+t",

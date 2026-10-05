@@ -15,6 +15,7 @@ type InputStateThis = {
 	scheduleInputSessionStateSave: () => void;
 	defaultEditor: { onSubmit?: (text: string) => void };
 	ui: { requestRender: () => void };
+	renderer?: { getFocusedComponent: () => unknown };
 };
 
 const prototype = InteractiveMode.prototype as unknown as {
@@ -74,6 +75,7 @@ describe("InteractiveMode input state", () => {
 			scheduleInputSessionStateSave: scheduleSave,
 			defaultEditor: {},
 			ui: { requestRender: vi.fn() },
+			renderer: { getFocusedComponent: () => nvim },
 		};
 
 		prototype.handleNeovimDraftChange.call(context, "draft", "n");
@@ -82,6 +84,29 @@ describe("InteractiveMode input state", () => {
 		expect(context.nvimInputMode).toBe("n");
 		expect(nvim.setText).not.toHaveBeenCalled();
 		expect(scheduleSave).toHaveBeenCalledOnce();
+	});
+
+	test("ignores delayed Neovim echoes while the original editor is focused", () => {
+		const nvim = { getText: () => "older draft", setText: vi.fn() };
+		const editor = { getText: () => "current draft", setText: vi.fn() };
+		const context: InputStateThis = {
+			inputSessionDraft: "current draft",
+			nvimInputMode: "i",
+			restoringInputState: false,
+			isBashMode: false,
+			nvimViewportContainer: nvim,
+			editor,
+			updateEditorBorderColor: vi.fn(),
+			scheduleInputSessionStateSave: vi.fn(),
+			defaultEditor: {},
+			ui: { requestRender: vi.fn() },
+			renderer: { getFocusedComponent: () => editor },
+		};
+
+		prototype.handleNeovimDraftChange.call(context, "older draft", "i");
+
+		expect(context.inputSessionDraft).toBe("current draft");
+		expect(editor.setText).not.toHaveBeenCalled();
 	});
 
 	test("Neovim submission uses Pi's normal submit handler and clears both editors", () => {

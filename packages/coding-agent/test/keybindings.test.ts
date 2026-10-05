@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { KEYBINDINGS, useWindowsKeybindings } from "../src/core/keybindings.ts";
+import { getInputToggleDefaultKeys, KEYBINDINGS, useWindowsKeybindings } from "../src/core/keybindings.ts";
 
 describe("Windows keybinding defaults", () => {
 	it("uses Windows keybindings on native Windows", () => {
@@ -20,8 +20,10 @@ describe("Windows keybinding defaults", () => {
 		expect(useWindowsKeybindings("darwin", {})).toBe(false);
 	});
 
-	it("defines the fullscreen input toggle on Command-/", () => {
-		expect(KEYBINDINGS["app.input.toggle"].defaultKeys).toBe("super+/");
+	it("uses an Alt-/ alias for the fullscreen input toggle only under tmux", () => {
+		expect(getInputToggleDefaultKeys(false)).toBe("super+/");
+		expect(getInputToggleDefaultKeys(true)).toEqual(["super+/", "alt+/"]);
+		expect(KEYBINDINGS["app.input.toggle"].defaultKeys).toEqual(getInputToggleDefaultKeys(Boolean(process.env.TMUX)));
 		expect(KEYBINDINGS["app.input.interrupt"].defaultKeys).toBe("super+escape");
 	});
 
