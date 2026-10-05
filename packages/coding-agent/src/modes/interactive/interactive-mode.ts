@@ -3417,6 +3417,10 @@ export class InteractiveMode {
 	}
 
 	private handleNeovimDraftChange(text: string, mode: NeovimInputMode): void {
+		// Neovim also reports programmatic mirror updates from the original editor.
+		// Ignore delayed echoes unless Neovim is the currently focused input source;
+		// otherwise a stale snapshot can reset the original editor and its cursor.
+		if (!this.nvimViewportContainer || this.renderer.getFocusedComponent() !== this.nvimViewportContainer) return;
 		this.inputSessionDraft = text;
 		this.nvimInputMode = mode;
 		if (this.restoringInputState) return;

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { KeybindingsManager } from "../src/core/keybindings.ts";
+import { getInputToggleDefaultKeys, KeybindingsManager } from "../src/core/keybindings.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
 type FakeUi = {
@@ -87,6 +87,23 @@ describe("InteractiveMode.handleCtrlZ", () => {
 		expect(context.keybindings.matches("\x1b[27;9u", "app.input.interrupt")).toBe(true);
 		expect(callHandlePanelInput(context, "\x1b[27;9u", ui)).toEqual({ data: "\x1b" });
 		expect(handlePiInterrupt).not.toHaveBeenCalled();
+	});
+
+	test("uses tmux's Meta form of Command-/ to toggle the input panel", () => {
+		const nvim = {};
+		const toggleInputPanel = vi.fn();
+		const keybindings = new KeybindingsManager({ "app.input.toggle": getInputToggleDefaultKeys(true) });
+		const context: HandlePanelInputThis = {
+			keybindings,
+			nvimViewportContainer: nvim,
+			handleCtrlZ: vi.fn(),
+			toggleInputPanel,
+		};
+		const ui: PanelInputUi = { hasOverlay: () => false, getFocusedComponent: () => nvim };
+
+		expect(keybindings.matches("\x1b/", "app.input.toggle")).toBe(true);
+		expect(callHandlePanelInput(context, "\x1b/", ui)).toEqual({ consume: true });
+		expect(toggleInputPanel).toHaveBeenCalledOnce();
 	});
 
 	test("consumes Command-/ without switching panels while an overlay is open", () => {
