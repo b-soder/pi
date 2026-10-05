@@ -831,7 +831,12 @@ export function matchesKey(data: string, keyId: KeyId): boolean {
 	switch (key) {
 		case "escape":
 		case "esc":
-			if (modifier !== 0) return false;
+			if (modifier !== 0) {
+				return (
+					matchesKittySequence(data, CODEPOINTS.escape, modifier) ||
+					matchesModifyOtherKeys(data, CODEPOINTS.escape, modifier)
+				);
+			}
 			return (
 				data === "\x1b" ||
 				matchesKittySequence(data, CODEPOINTS.escape, 0) ||

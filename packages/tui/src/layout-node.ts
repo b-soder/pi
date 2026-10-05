@@ -15,6 +15,7 @@ export interface StackLayoutEntry {
 	minSize?: number;
 	maxSize?: number;
 	visible?: (viewport: LayoutViewport) => boolean;
+	onLayout?: (width: number, height: number) => void;
 }
 
 export interface StackLayoutNode {

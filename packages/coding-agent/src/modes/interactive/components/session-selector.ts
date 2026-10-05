@@ -16,6 +16,7 @@ import {
 import { KeybindingsManager } from "../../../core/keybindings.ts";
 import type { SessionInfo, SessionListProgress } from "../../../core/session-manager.ts";
 import { canonicalizePath as _canonicalizePath } from "../../../utils/paths.ts";
+import { deleteInputSessionState, getInputSessionStatePath } from "../input-session-state.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
 import { keyHint, keyText } from "./keybinding-hints.ts";
@@ -671,14 +672,24 @@ async function deleteSessionFile(
 		return `trash: ${parts.join(" · ").slice(0, 200)}`;
 	};
 
+	const removeInputState = (): void => {
+		try {
+			deleteInputSessionState(getInputSessionStatePath(sessionPath));
+		} catch {
+			// Session input state is optional; the session deletion remains successful.
+		}
+	};
+
 	// If trash reports success, or the file is gone afterwards, treat it as successful
 	if (trashResult.status === 0 || !existsSync(sessionPath)) {
+		removeInputState();
 		return { ok: true, method: "trash" };
 	}
 
 	// Fallback to permanent deletion
 	try {
 		await unlink(sessionPath);
+		removeInputState();
 		return { ok: true, method: "unlink" };
 	} catch (err) {
 		const unlinkError = err instanceof Error ? err.message : String(err);

@@ -5,6 +5,7 @@ import {
 	AltScreenSearchIndex,
 	findAltScreenSearchMatches,
 } from "../src/alt-screen-search.ts";
+import { foregroundAnsi } from "../src/colors.ts";
 import { HStack } from "../src/components/h-stack.ts";
 import { Image } from "../src/components/image.ts";
 import { MouseRegion } from "../src/components/mouse-region.ts";
@@ -15,12 +16,13 @@ import { VStack } from "../src/components/v-stack.ts";
 import { getKeybindings, KeybindingsManager, setKeybindings, TUI_KEYBINDINGS } from "../src/keybindings.ts";
 import {
 	encodeKitty,
+	getTerminalColorMode,
 	hyperlink,
 	registerKittyImageMetadata,
 	resetCapabilitiesCache,
 	setCapabilities,
 } from "../src/terminal-image.ts";
-import type { TuiMouseEvent } from "../src/tui.ts";
+import { CURSOR_MARKER, type TuiMouseEvent } from "../src/tui.ts";
 import { TuiAltScreen } from "../src/tui-alt-screen.ts";
 import { stripTerminalSequences, visibleWidth } from "../src/utils.ts";
 import { VirtualTerminal } from "./virtual-terminal.ts";
@@ -93,6 +95,60 @@ describe("TuiAltScreen", () => {
 			["line 6", "line 7", "line 8", "line 9"],
 		);
 
+		tui.stop();
+	});
+
+	it("frames the fullscreen layout with a one-cell border without covering its content", async () => {
+		const terminal = new RecordingTerminal(10, 5);
+		const tui = new TuiAltScreen(terminal);
+		tui.setShowHardwareCursor(true);
+		tui.setViewportBorderStyle((text) => text);
+		tui.setLayoutRoot(new VStack([new Text(`${CURSOR_MARKER}hello`, 0, 0)]));
+		tui.start();
+		await terminal.waitForRender();
+		assert.deepStrictEqual(terminal.getViewport(), [
+			"┌────────┐",
+			"│hello   │",
+			"│        │",
+			"│        │",
+			"└────────┘",
+		]);
+		assert.ok(terminal.events.some((event) => event.type === "write" && event.data.includes("\x1b[2;2H")));
+
+		const color = foregroundAnsi({ kind: "rgb", r: 255, g: 0, b: 0 }, getTerminalColorMode());
+		tui.setViewportBorderStyle((text) => `${color}${text}\x1b[39m`);
+		await terminal.waitForRender();
+		assert.deepStrictEqual(terminal.getViewport(), [
+			"┌────────┐",
+			"│hello   │",
+			"│        │",
+			"│        │",
+			"└────────┘",
+		]);
+		assert.ok(tui.getScreenLines()[0]?.includes(color));
+		tui.stop();
+	});
+
+	it("does not include the fullscreen border in copied selections", async () => {
+		const terminal = new RecordingTerminal(10, 5);
+		const copied: string[] = [];
+		const tui = new TuiAltScreen(terminal, undefined, undefined, {
+			copySelection: async (text) => {
+				copied.push(text);
+				return true;
+			},
+		});
+		tui.setViewportBorderStyle((text) => text);
+		tui.setLayoutRoot(new Text("hello\nworld", 0, 0));
+		tui.start();
+		await terminal.waitForRender();
+
+		terminal.sendInput("\x1b[<0;2;2M");
+		terminal.sendInput("\x1b[<32;10;2M");
+		terminal.sendInput("\x1b[<0;10;2m");
+		await terminal.waitForRender();
+
+		assert.deepStrictEqual(copied, ["hello"]);
 		tui.stop();
 	});
 

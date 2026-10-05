@@ -20,6 +20,11 @@ describe("Windows keybinding defaults", () => {
 		expect(useWindowsKeybindings("darwin", {})).toBe(false);
 	});
 
+	it("defines the fullscreen input toggle on Command-/", () => {
+		expect(KEYBINDINGS["app.input.toggle"].defaultKeys).toBe("super+/");
+		expect(KEYBINDINGS["app.input.interrupt"].defaultKeys).toBe("super+escape");
+	});
+
 	it("applies the detected defaults consistently", () => {
 		const windowsKeybindings = useWindowsKeybindings();
 		const nativeWindows = process.platform === "win32";

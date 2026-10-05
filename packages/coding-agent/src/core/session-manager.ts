@@ -1137,6 +1137,23 @@ export class SessionManager {
 		return this.persist;
 	}
 
+	/** Persist the session header and current entries even before the first conversation message. */
+	ensureSessionFile(): string | undefined {
+		if (!this.persist || !this.sessionFile) return undefined;
+		if (!this.flushed) {
+			const fd = openSync(this.sessionFile, "wx");
+			try {
+				for (const entry of this.fileEntries) {
+					writeFileSync(fd, `${JSON.stringify(entry)}\n`);
+				}
+			} finally {
+				closeSync(fd);
+			}
+			this.flushed = true;
+		}
+		return this.sessionFile;
+	}
+
 	getCwd(): string {
 		return this.cwd;
 	}

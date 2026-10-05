@@ -2,6 +2,7 @@ import { Container, ScrollView, Text, VStack } from "@earendil-works/pi-tui";
 import { describe, expect, test } from "vitest";
 import { Editor } from "../../tui/src/components/editor.ts";
 import { renderLayoutFrame } from "../../tui/src/layout.ts";
+import { TuiAltScreen } from "../../tui/src/tui-alt-screen.ts";
 import { TuiMainScreen } from "../../tui/src/tui-main-screen.ts";
 import { defaultEditorTheme } from "../../tui/test/test-themes.ts";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
@@ -37,6 +38,7 @@ describe("chat viewport", () => {
 		const viewport = createChatViewport({
 			document: new Container(),
 			toolOutput: new Container(),
+			nvimViewport: new Text("Neovim viewport - not connected", 1, 0),
 			fourPanel: true,
 			activity: new VStack([activity, status]),
 			pendingMessages: new Container(),
@@ -50,8 +52,8 @@ describe("chat viewport", () => {
 		expect(rendered).toContain("OM worker");
 		expect(rendered).toContain(": Working");
 		expect(rendered.indexOf(": Working")).toBe(rendered.lastIndexOf(": Working"));
-		expect(frame.root.children).toHaveLength(7);
-		expect(frame.root.children[4]!.rect.height).toBe(1);
+		expect(frame.root.children).toHaveLength(9);
+		expect(frame.root.children[4]!.rect.height).toBeGreaterThanOrEqual(3);
 	});
 
 	test("places extension activity in the transcript instead of input", () => {
@@ -75,22 +77,105 @@ describe("chat viewport", () => {
 		expect(viewport.transcript.children[0]).toHaveProperty("children");
 	});
 
-	test("builds four separately scrollable panels when requested", () => {
+	test("builds five panels with the Neovim viewport between transcript and input", () => {
 		const toolOutput = new Container();
+		const nvimViewport = new Container();
+		nvimViewport.addChild(new Text("Neovim viewport - not connected", 1, 0));
 		const viewport = createChatViewport({
 			document: new Container(),
 			toolOutput,
+			nvimViewport,
 			fourPanel: true,
 			pendingMessages: new Container(),
 			status: new Container(),
 			editor: new Container(),
 			footer: new Container(),
+			getTerminalRows: () => 40,
+			getTerminalColumns: () => 80,
 		});
+		const frame = renderLayoutFrame(viewport.root, 80, 40, () => {});
 
 		expect(viewport.toolOutput).toBeInstanceOf(ScrollView);
 		expect(viewport.toolOutput?.overscroll).toBe("contain");
 		expect(viewport.transcript.primary).toBe(true);
-		expect(viewport.root).toBeDefined();
+		expect(frame.root.children).toHaveLength(9);
+		expect(frame.root.children[4]!.rect.y).toBeGreaterThan(frame.root.children[2]!.rect.y);
+		expect(frame.root.children[6]!.rect.y).toBeGreaterThan(frame.root.children[4]!.rect.y);
+		expect(frame.lines.join("\\n")).toContain("Neovim viewport - not connected");
+	});
+
+	test("shows only selected input panels and keeps the hidden panel's Neovim instance mounted", () => {
+		const inputMode = { value: "orig" as "orig" | "nvim" | "both" };
+		const nvim = new Text("NEOVIM PANEL", 0, 0);
+		const originalInput = new Text("ORIGINAL INPUT", 0, 0);
+		const viewport = createChatViewport({
+			document: new Container(),
+			toolOutput: new Container(),
+			nvimViewport: nvim,
+			fourPanel: true,
+			getInputMode: () => inputMode.value,
+			pendingMessages: new Container(),
+			status: new Container(),
+			editor: originalInput,
+			footer: new Container(),
+			getTerminalRows: () => 40,
+			getTerminalColumns: () => 80,
+		});
+
+		const render = () => renderLayoutFrame(viewport.root, 80, 40, () => {});
+		let frame = render();
+		expect(frame.root.children).toHaveLength(7);
+		expect(frame.lines.join("\\n")).toContain("ORIGINAL INPUT");
+		expect(frame.lines.join("\\n")).not.toContain("NEOVIM PANEL");
+
+		inputMode.value = "nvim";
+		frame = render();
+		expect(frame.root.children).toHaveLength(7);
+		expect(frame.lines.join("\\n")).toContain("NEOVIM PANEL");
+		expect(frame.lines.join("\\n")).not.toContain("ORIGINAL INPUT");
+		expect((viewport.root as Container).children).toContain(nvim);
+
+		inputMode.value = "both";
+		frame = render();
+		expect(frame.root.children).toHaveLength(9);
+		expect(frame.lines.join("\\n")).toContain("NEOVIM PANEL");
+		expect(frame.lines.join("\\n")).toContain("ORIGINAL INPUT");
+		expect(frame.root.children.reduce((height, child) => height + child.rect.height, 0)).toBe(40);
+
+		const footerHeight = frame.root.children.at(-1)!.rect.height;
+		for (let iteration = 0; iteration < 12; iteration++) {
+			inputMode.value = "nvim";
+			frame = render();
+			expect(frame.root.children.reduce((height, child) => height + child.rect.height, 0)).toBe(40);
+			inputMode.value = "both";
+			frame = render();
+			expect(frame.root.children.reduce((height, child) => height + child.rect.height, 0)).toBe(40);
+			expect(frame.root.children.at(-1)!.rect.height).toBe(footerHeight);
+		}
+	});
+
+	test("can stop the fullscreen renderer without overflowing panel sizing", async () => {
+		const terminal = new VirtualTerminal(80, 40);
+		const viewport = createChatViewport({
+			document: new Container(),
+			toolOutput: new Container(),
+			nvimViewport: new Text("Neovim panel", 0, 0),
+			fourPanel: true,
+			getInputMode: () => "orig",
+			pendingMessages: new Container(),
+			status: new Container(),
+			editor: new Text("prompt", 0, 0),
+			footer: new Container(),
+			getTerminalRows: () => terminal.rows,
+			getTerminalColumns: () => terminal.columns,
+		});
+		const tui = new TuiAltScreen(terminal);
+		tui.setLayoutRoot(viewport.root);
+		tui.setViewportBorderStyle((text) => text);
+		tui.start();
+		await terminal.waitForRender();
+
+		expect(() => tui.stop()).not.toThrow();
 	});
 
 	test("resizes adjacent panels by dragging their separator", () => {
@@ -141,6 +226,7 @@ describe("chat viewport", () => {
 		const viewport = createChatViewport({
 			document: new Container(),
 			toolOutput: new Container(),
+			nvimViewport: new Text("Neovim viewport - not connected", 1, 0),
 			fourPanel: true,
 			pendingMessages: new Container(),
 			activity: new Container(),
@@ -151,7 +237,7 @@ describe("chat viewport", () => {
 			getTerminalColumns: () => 80,
 		});
 		const measureInput = () =>
-			renderLayoutFrame(viewport.root, 80, terminalRows.value, () => {}).root.children[4]!.rect.height;
+			renderLayoutFrame(viewport.root, 80, terminalRows.value, () => {}).root.children[6]!.rect.height;
 
 		const emptyHeight = measureInput();
 		expect(emptyHeight).toBe(1);
@@ -163,26 +249,26 @@ describe("chat viewport", () => {
 		expect(measureInput()).toBe(emptyHeight);
 		editor.handleInput("\x1b[13;2u");
 		const newlineFrame = renderLayoutFrame(viewport.root, 80, terminalRows.value, () => {});
-		expect(newlineFrame.root.children[4]!.rect.height).toBe(emptyHeight + 1);
+		expect(newlineFrame.root.children[6]!.rect.height).toBe(emptyHeight + 1);
 		expect(newlineFrame.lines.join("\n")).toContain("111");
 		expect(editor.render(80)).toHaveLength(2);
-		expect(newlineFrame.root.children[4]!.children[1]!.rect.height).toBe(2);
+		expect(newlineFrame.root.children[6]!.children[1]!.rect.height).toBe(2);
 		terminalRows.value = 40;
 		const expandedFrame = renderLayoutFrame(viewport.root, 80, terminalRows.value, () => {});
-		expect(expandedFrame.root.children[4]!.rect.height).toBe(2);
+		expect(expandedFrame.root.children[6]!.rect.height).toBe(2);
 		expect(expandedFrame.lines.join("\n")).toContain("111");
 		terminalRows.value = 24;
 		const shrunkFrame = renderLayoutFrame(viewport.root, 80, terminalRows.value, () => {});
-		expect(shrunkFrame.root.children[4]!.rect.height).toBe(2);
+		expect(shrunkFrame.root.children[6]!.rect.height).toBe(2);
 		expect(shrunkFrame.lines.join("\n")).toContain("111");
 		editor.handleInput("\x1b[13;2u");
 		const secondNewlineFrame = renderLayoutFrame(viewport.root, 80, terminalRows.value, () => {});
-		expect(secondNewlineFrame.root.children[4]!.rect.height).toBe(3);
+		expect(secondNewlineFrame.root.children[6]!.rect.height).toBe(3);
 		expect(secondNewlineFrame.lines.join("\n")).toContain("111");
 
 		editor.setText("");
 		renderLayoutFrame(viewport.root, 80, terminalRows.value, () => {});
-		const reopenedInput = renderLayoutFrame(viewport.root, 80, terminalRows.value, () => {}).root.children[4]!;
+		const reopenedInput = renderLayoutFrame(viewport.root, 80, terminalRows.value, () => {}).root.children[6]!;
 		expect(reopenedInput.rect.height).toBe(1);
 	});
 

@@ -34,11 +34,14 @@ import {
 	CombinedAutocompleteProvider,
 	type Component,
 	Container,
+	foregroundAnsi,
 	fuzzyFilter,
 	getCapabilities,
+	getTerminalColorMode,
 	hyperlink,
 	Markdown,
 	matchesKey,
+	parseColor,
 	Spacer,
 	setCapabilityOverrides,
 	setKeybindings,
@@ -135,7 +138,7 @@ import { loadAllHighlightLanguages } from "../../utils/syntax-highlight.ts";
 import { ensureTool, type ToolStatus } from "../../utils/tools-manager.ts";
 import { checkForNewPiVersion, type LatestPiRelease } from "../../utils/version-check.ts";
 import { reportBug } from "./bug-report.ts";
-import { createChatViewport } from "./chat-viewport.ts";
+import { createChatViewport, type InputPanelMode } from "./chat-viewport.ts";
 import { ArminComponent } from "./components/armin.ts";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
 import { BashExecutionComponent } from "./components/bash-execution.ts";
@@ -155,6 +158,7 @@ import { formatKeyText, keyDisplayText, keyHint, keyText, rawKeyHint } from "./c
 import { LoginDialogComponent } from "./components/login-dialog.ts";
 import { createMermaidMarkdownTransformer } from "./components/mermaid.ts";
 import { ModelSelectorComponent } from "./components/model-selector.ts";
+import { NeovimViewport } from "./components/neovim-viewport.ts";
 import {
 	type AuthSelectorProvider,
 	formatAuthSelectorProviderStatus,
@@ -183,6 +187,8 @@ import { TrustSelectorComponent } from "./components/trust-selector.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.ts";
 import { editInExternalEditor } from "./external-editor.ts";
+import type { NeovimInputMode } from "./input-session-state.ts";
+import { getInputSessionStatePath, readInputSessionState, writeInputSessionState } from "./input-session-state.ts";
 import { refreshModelCatalogs } from "./model-catalog-refresh.ts";
 import { getModelSearchText } from "./model-search.ts";
 import { shareSession } from "./session-share.ts";
@@ -456,11 +462,20 @@ export class InteractiveMode {
 	private loadedResourcesContainer: Container;
 	private chatContainer: Container;
 	private toolOutputContainer: Container;
+	private nvimViewportContainer: NeovimViewport | undefined;
 	private documentContainer: Container;
 	private toolOutputEnabled = false;
 	private suppressEditorBorders = false;
 	private transcriptScrollView: TuiLayouts.ScrollView | undefined;
 	private fullscreenLayoutRoot: Component | undefined;
+	private viewportBorderColor: string | undefined;
+	private inputPanelMode: InputPanelMode = "orig";
+	private inputSessionDraft = "";
+	private nvimInputMode: NeovimInputMode = "i";
+	private restoringInputState = false;
+	private inputStateSaveTimer: NodeJS.Timeout | undefined;
+	private inputStateSaveWarningShown = false;
+	private removeInputPanelKeyListener: (() => void) | undefined;
 	private pendingMessagesContainer: Container;
 	private statusContainer: Container;
 	private defaultEditor: CustomEditor;
@@ -609,10 +624,12 @@ export class InteractiveMode {
 		this.options = { ...options, tuiMode };
 		this.autoTrustOnReloadCwd = options.autoTrustOnReloadCwd;
 		this.runtimeHost.setBeforeSessionInvalidate(() => {
+			this.persistInputSessionState();
 			this.resetExtensionUI();
 		});
 		this.runtimeHost.setRebindSession(async () => {
 			await this.rebindCurrentSession({ renderBeforeBind: true });
+			this.restoreInputStateForCurrentSession();
 			this.themeController.applyFromSettings();
 		});
 		this.version = VERSION;
@@ -669,6 +686,7 @@ export class InteractiveMode {
 			onChanged: () => this.updateEditorBorderColor(),
 			initialThemeSetting: options.initialThemeSetting,
 		});
+		this.restoreInputStateForCurrentSession();
 	}
 
 	private getAutocompleteSourceTag(sourceInfo?: SourceInfo): string | undefined {
@@ -921,7 +939,12 @@ export class InteractiveMode {
 		}
 		this.renderer = nextUi;
 		this.options.tuiMode = mode;
+		this.bindInputPanelKeyListener(nextUi);
 		this.mountInteractiveTui(nextUi, components);
+		if (nextUi instanceof TuiAltScreen && this.viewportBorderColor) {
+			const ansi = foregroundAnsi(parseColor(this.viewportBorderColor), getTerminalColorMode());
+			nextUi.setViewportBorderStyle((value) => `${ansi}${value}\x1b[39m`);
+		}
 		nextUi.invalidate();
 		nextUi.setFocus(focus);
 		if (!startRenderer) return true;
@@ -964,17 +987,31 @@ export class InteractiveMode {
 		// Keep one component tree and remount it when changing renderers.
 		this.toolOutputEnabled =
 			this.options.tuiMode === "fullscreen" && this.settingsManager.getExperimentalTuiLayout() === "four-panel";
+		if (this.toolOutputEnabled) {
+			this.nvimViewportContainer = new NeovimViewport(this.ui, {
+				onSubmit: (text) => this.submitFromNeovim(text),
+				onQuit: () => this.handleCtrlD(),
+				onInterrupt: () => this.handlePiInterrupt(),
+				onDraftChange: (text, mode) => this.handleNeovimDraftChange(text, mode),
+				onModeChange: (mode) => this.handleNeovimModeChange(mode),
+				initialText: this.inputSessionDraft,
+				initialMode: this.nvimInputMode,
+			});
+		}
 		this.renderWidgets();
 		this.suppressEditorBorders = this.toolOutputEnabled;
 		if (this.suppressEditorBorders) this.defaultEditor.setPanelBordersHidden(true);
 		const viewport = createChatViewport({
 			document: this.documentContainer,
 			toolOutput: this.toolOutputContainer,
+			nvimViewport: this.nvimViewportContainer,
+			onNvimViewportLayout: (width, height) => this.nvimViewportContainer?.setViewportSize(width, height),
 			fourPanel: this.toolOutputEnabled,
 			activity: new VStack([this.widgetContainerAbove, this.widgetContainerBelow]),
 			dividerStatus: (width) =>
 				this.activeStatusIndicator?.renderInBorder(Math.max(1, width)) ||
 				this.activeStatusIndicator?.renderSpinnerInBorder(Math.max(1, width)),
+			getInputMode: () => this.inputPanelMode,
 			pendingMessages: this.pendingMessagesContainer,
 			status: this.statusContainer,
 			widgetsAbove: this.toolOutputEnabled ? undefined : this.widgetContainerAbove,
@@ -989,6 +1026,15 @@ export class InteractiveMode {
 		});
 		this.transcriptScrollView = viewport.transcript;
 		this.fullscreenLayoutRoot = viewport.root;
+		if (this.renderer instanceof TuiAltScreen) {
+			const ansi = this.viewportBorderColor
+				? foregroundAnsi(parseColor(this.viewportBorderColor), getTerminalColorMode())
+				: undefined;
+			this.renderer.setViewportBorderStyle((value) =>
+				ansi ? `${ansi}${value}\x1b[39m` : theme.fg("border", value),
+			);
+		}
+		this.bindInputPanelKeyListener(this.renderer);
 		this.mountInteractiveTui(this.renderer, [
 			this.documentContainer,
 			this.pendingMessagesContainer,
@@ -1003,6 +1049,11 @@ export class InteractiveMode {
 		this.defaultEditor.onCtrlD = () => this.handleCtrlD();
 		this.defaultEditor.onSubmit = (text) => this.handleStartupSubmit(text);
 		this.ui.setFocus(this.editor);
+		if (this.inputPanelMode === "nvim" && this.nvimViewportContainer) {
+			void this.nvimViewportContainer.ready.then(() => {
+				if (this.inputPanelMode === "nvim") this.ui.setFocus(this.nvimViewportContainer ?? null);
+			});
+		}
 
 		// Start the UI before initializing extensions so session_start handlers can use interactive dialogs
 		this.ui.start();
@@ -3119,6 +3170,7 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.clear", () => this.handleCtrlC());
 		this.defaultEditor.onCtrlD = () => this.handleCtrlD();
 		this.defaultEditor.onAction("app.suspend", () => this.handleCtrlZ());
+		this.defaultEditor.onAction("app.input.toggle", () => this.toggleInputPanel());
 		this.defaultEditor.onAction("app.thinking.cycle", () => this.cycleThinkingLevel());
 		this.defaultEditor.onAction("app.model.cycleForward", () => this.cycleModel("forward"));
 		this.defaultEditor.onAction("app.model.cycleBackward", () => this.cycleModel("backward"));
@@ -3140,13 +3192,7 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.session.fork", () => this.showUserMessageSelector());
 		this.defaultEditor.onAction("app.session.resume", () => this.showSessionSelector());
 
-		this.defaultEditor.onChange = (text: string) => {
-			const wasBashMode = this.isBashMode;
-			this.isBashMode = text.trimStart().startsWith("!");
-			if (wasBashMode !== this.isBashMode) {
-				this.updateEditorBorderColor();
-			}
-		};
+		this.defaultEditor.onChange = (text: string) => this.handleOriginalInputChange(text);
 
 		// Handle clipboard paste (triggered on Ctrl+V). Copied files use their original paths,
 		// images are attached via temporary files, and plain text is the final fallback.
@@ -3211,6 +3257,228 @@ export class InteractiveMode {
 		}
 	}
 
+	private handleInputCommand(text: string): void {
+		const argument = text.slice("/input".length).trim().toLowerCase();
+		if (!argument) {
+			this.showStatus(`Input panels: ${this.inputPanelMode}`);
+			return;
+		}
+		const aliases: Record<string, InputPanelMode> = {
+			orig: "orig",
+			o: "orig",
+			nvim: "nvim",
+			vi: "nvim",
+			n: "nvim",
+			both: "both",
+			b: "both",
+		};
+		const mode = aliases[argument];
+		if (!mode) {
+			this.showError("Usage: /input orig|o|nvim|vi|n|both|b");
+			return;
+		}
+		if (!this.toolOutputEnabled) {
+			this.showError("/input is available only in the experimental fullscreen panel layout");
+			return;
+		}
+		this.setInputPanelMode(mode);
+	}
+
+	private bindInputPanelKeyListener(tui: TuiMainScreen | TuiAltScreen): void {
+		this.removeInputPanelKeyListener?.();
+		this.removeInputPanelKeyListener = undefined;
+		if (!this.toolOutputEnabled || !TuiLayouts.isViewportTUI(tui)) return;
+		this.removeInputPanelKeyListener = tui.addInputListener((data) => this.handlePanelInput(data, tui));
+	}
+
+	private handlePanelInput(
+		data: string,
+		tui: TuiMainScreen | TuiAltScreen,
+	): { consume?: true; data?: string } | undefined {
+		if (this.keybindings.matches(data, "app.input.interrupt")) {
+			if (tui.hasOverlay()) return { data: "\x1b" };
+			if (tui.getFocusedComponent() === this.editor && this.defaultEditor.isShowingAutocomplete()) {
+				return { data: "\x1b" };
+			}
+			this.handlePiInterrupt();
+			return { consume: true };
+		}
+		if (this.keybindings.matches(data, "app.input.toggle")) {
+			if (tui.hasOverlay()) return { consume: true };
+			this.toggleInputPanel();
+			return { consume: true };
+		}
+		if (tui.hasOverlay() || tui.getFocusedComponent() !== this.nvimViewportContainer) return undefined;
+		if (this.keybindings.matches(data, "app.suspend")) {
+			this.handleCtrlZ();
+			return { consume: true };
+		}
+		return undefined;
+	}
+
+	private handlePiInterrupt(): void {
+		if (this.session.isStreaming) {
+			this.restoreQueuedMessagesToEditor({ abort: true });
+		} else if (this.session.isBashRunning) {
+			this.session.abortBash();
+		} else if (this.isBashMode) {
+			this.editor.setText("");
+			this.isBashMode = false;
+			this.updateEditorBorderColor();
+		}
+	}
+
+	private toggleInputPanel(): void {
+		if (!this.toolOutputEnabled || !TuiLayouts.isViewportTUI(this.renderer) || this.renderer.hasOverlay()) return;
+		this.setInputPanelMode(this.inputPanelMode === "nvim" ? "both" : "nvim");
+	}
+
+	private setInputPanelMode(mode: InputPanelMode): void {
+		this.inputPanelMode = mode;
+		if (mode === "nvim" && this.nvimViewportContainer) {
+			void this.nvimViewportContainer.ready.then(() => {
+				if (this.inputPanelMode === "nvim") this.ui.setFocus(this.nvimViewportContainer ?? null);
+			});
+		} else {
+			this.ui.setFocus(this.editor);
+		}
+		this.scheduleInputSessionStateSave();
+		this.ui.requestRender();
+	}
+
+	private inputSessionStatePath(): string | undefined {
+		const manager = this.sessionManager;
+		const sessionFile = manager.getSessionFile();
+		return manager.isPersisted() && sessionFile ? getInputSessionStatePath(sessionFile) : undefined;
+	}
+
+	private restoreInputStateForCurrentSession(): void {
+		const statePath = this.inputSessionStatePath();
+		const state = statePath ? readInputSessionState(statePath, this.sessionManager.getSessionId()) : undefined;
+		this.restoringInputState = true;
+		try {
+			this.inputPanelMode = state?.inputPanelMode ?? "orig";
+			this.inputSessionDraft = state?.draft ?? "";
+			this.nvimInputMode = state?.nvimMode ?? "i";
+			this.editor.setText(this.inputSessionDraft);
+			if (this.nvimViewportContainer) {
+				void this.nvimViewportContainer
+					.restoreState(this.inputSessionDraft, this.nvimInputMode)
+					.catch((error: unknown) => this.handleInputStateError("restore", error));
+			}
+		} finally {
+			this.restoringInputState = false;
+		}
+		if (this.isInitialized) {
+			if (this.inputPanelMode === "nvim" && this.nvimViewportContainer) {
+				void this.nvimViewportContainer.ready.then(() => {
+					if (this.inputPanelMode === "nvim") this.ui.setFocus(this.nvimViewportContainer ?? null);
+				});
+			} else {
+				this.ui.setFocus(this.editor);
+			}
+			this.ui.requestRender();
+		}
+	}
+
+	private handleOriginalInputChange(text: string): void {
+		const wasBashMode = this.isBashMode;
+		this.isBashMode = text.trimStart().startsWith("!");
+		if (wasBashMode !== this.isBashMode) this.updateEditorBorderColor();
+		this.inputSessionDraft = text;
+		if (this.restoringInputState) return;
+		if (this.nvimViewportContainer && this.nvimViewportContainer.getText() !== text) {
+			this.nvimViewportContainer.setText(text);
+		}
+		this.scheduleInputSessionStateSave();
+	}
+
+	private handleNeovimDraftChange(text: string, mode: NeovimInputMode): void {
+		this.inputSessionDraft = text;
+		this.nvimInputMode = mode;
+		if (this.restoringInputState) return;
+		if (this.editor.getText() !== text) this.editor.setText(text);
+		else this.scheduleInputSessionStateSave();
+	}
+
+	private handleNeovimModeChange(mode: NeovimInputMode): void {
+		if (this.nvimInputMode === mode) return;
+		this.nvimInputMode = mode;
+		if (!this.restoringInputState) this.scheduleInputSessionStateSave();
+	}
+
+	private scheduleInputSessionStateSave(): void {
+		if (this.restoringInputState || !this.inputSessionStatePath()) return;
+		if (this.inputStateSaveTimer) clearTimeout(this.inputStateSaveTimer);
+		this.inputStateSaveTimer = setTimeout(() => {
+			this.inputStateSaveTimer = undefined;
+			this.persistInputSessionState();
+		}, 250);
+		this.inputStateSaveTimer.unref();
+	}
+
+	private persistInputSessionState(): void {
+		if (this.inputStateSaveTimer) {
+			clearTimeout(this.inputStateSaveTimer);
+			this.inputStateSaveTimer = undefined;
+		}
+		const statePath = this.inputSessionStatePath();
+		if (!statePath) return;
+		const manager = this.sessionManager;
+		const sessionFile = manager.getSessionFile();
+		if (!sessionFile) return;
+		const draft = this.editor.getText();
+		this.inputSessionDraft = draft;
+		const hasSessionFile = fs.existsSync(sessionFile);
+		const hasInputState = fs.existsSync(statePath);
+		if (!hasSessionFile && !hasInputState && !draft && this.inputPanelMode === "orig" && this.nvimInputMode === "i") {
+			return;
+		}
+		try {
+			manager.ensureSessionFile();
+			writeInputSessionState(statePath, {
+				sessionId: manager.getSessionId(),
+				draft,
+				inputPanelMode: this.inputPanelMode,
+				nvimMode: this.nvimInputMode,
+			});
+		} catch (error) {
+			this.handleInputStateError("save", error);
+		}
+	}
+
+	private handleInputStateError(action: "restore" | "save", error: unknown): void {
+		if (this.inputStateSaveWarningShown) return;
+		this.inputStateSaveWarningShown = true;
+		const message = error instanceof Error ? error.message : String(error);
+		if (this.isInitialized) this.showWarning(`Could not ${action} the session input draft: ${message}`);
+		else console.warn(`Could not ${action} the session input draft: ${message}`);
+	}
+
+	private handleBorderCommand(text: string): void {
+		const argument = text.slice("/border".length).trim();
+		if (!argument) {
+			this.showStatus(`Fullscreen border color: ${this.viewportBorderColor ?? "theme default"}`);
+			return;
+		}
+		if (argument === "default") {
+			this.viewportBorderColor = undefined;
+			if (this.renderer instanceof TuiAltScreen) {
+				this.renderer.setViewportBorderStyle((value) => theme.fg("border", value));
+			}
+			return;
+		}
+		if (!/^#[\da-f]{6}$/i.test(argument)) {
+			this.showError("Usage: /border #RRGGBB (or /border default)");
+			return;
+		}
+		this.viewportBorderColor = argument.toUpperCase();
+		const ansi = foregroundAnsi(parseColor(this.viewportBorderColor), getTerminalColorMode());
+		if (this.renderer instanceof TuiAltScreen) {
+			this.renderer.setViewportBorderStyle((value) => `${ansi}${value}\x1b[39m`);
+		}
+	}
+
 	private handleStartupSubmit(text: string): void {
 		this.editor.setText(text);
 		this.showStatus("Startup is still in progress");
@@ -3222,6 +3490,16 @@ export class InteractiveMode {
 			if (!text) return;
 
 			// Handle commands
+			if (text === "/input" || text.startsWith("/input ")) {
+				this.handleInputCommand(text);
+				this.editor.setText("");
+				return;
+			}
+			if (text === "/border" || text.startsWith("/border ")) {
+				this.handleBorderCommand(text);
+				this.editor.setText("");
+				return;
+			}
 			if (text === "/settings") {
 				this.showSettingsSelector();
 				this.editor.setText("");
@@ -3407,6 +3685,7 @@ export class InteractiveMode {
 			// Normal message submission
 			// First, move any pending bash components to chat
 			this.flushPendingBashComponents();
+			this.editor.addToHistory?.(text);
 
 			if (this.onInputCallback) {
 				this.onInputCallback(text);
@@ -3415,6 +3694,15 @@ export class InteractiveMode {
 			}
 			this.editor.addToHistory?.(text);
 		};
+	}
+
+	private submitFromNeovim(text: string): void {
+		const value = text.trim();
+		if (!value) return;
+		this.editor.setText("");
+		this.nvimViewportContainer?.setText("");
+		if (this.defaultEditor.onSubmit) void this.defaultEditor.onSubmit(value);
+		this.ui.requestRender();
 	}
 
 	private subscribeToAgent(): void {
@@ -7146,6 +7434,7 @@ export class InteractiveMode {
 	}
 
 	stop(fullscreenExitOutput = this.settingsManager.getFullscreenExitOutput()): void {
+		this.persistInputSessionState();
 		this.disposeActiveSelector();
 		if (this.settingsManager.getShowTerminalProgress()) {
 			this.ui.terminal.setProgress(false);
@@ -7153,6 +7442,10 @@ export class InteractiveMode {
 		this.clearStatusIndicator();
 		this.themeController.disableAutoSync();
 		this.clearExtensionTerminalInputListeners();
+		this.removeInputPanelKeyListener?.();
+		this.removeInputPanelKeyListener = undefined;
+		this.nvimViewportContainer?.dispose();
+		this.nvimViewportContainer = undefined;
 		this.footer.dispose();
 		this.footerDataProvider.dispose();
 		if (this.unsubscribe) {

@@ -1,5 +1,13 @@
 import type { Terminal, WheelScrollLines } from "@earendil-works/pi-tui";
-import { ProcessTerminal, type TUI, TuiAltScreen, TuiMainScreen } from "@earendil-works/pi-tui";
+import {
+	foregroundAnsi,
+	getTerminalColorMode,
+	ProcessTerminal,
+	parseColor,
+	type TUI,
+	TuiAltScreen,
+	TuiMainScreen,
+} from "@earendil-works/pi-tui";
 import { copyToClipboard } from "../../utils/clipboard.ts";
 import { openBrowser } from "../../utils/open-browser.ts";
 import { keyDisplayText } from "./components/keybinding-hints.ts";
@@ -13,6 +21,7 @@ export interface InteractiveTuiOptions {
 	readonly onRightClickPaste?: () => void;
 	readonly fullscreenCopyOnSelect?: boolean;
 	readonly fullscreenWheelScrollLines?: WheelScrollLines;
+	readonly fullscreenBorderColor?: string;
 }
 
 /** Composition root shared by coding-agent presentations. */
@@ -23,6 +32,13 @@ export function createInteractiveTui(options: InteractiveTuiOptions): TuiMainScr
 	const terminal = options.terminal ?? new ProcessTerminal();
 	if (options.tuiMode === "fullscreen") {
 		const styleSearchMatch = (text: string) => theme.bg("searchMatchBg", theme.fg("searchMatchText", text));
+		const borderStyle = (color: string) => {
+			const ansi = foregroundAnsi(parseColor(color), getTerminalColorMode());
+			return (text: string) => `${ansi}${text}\x1b[39m`;
+		};
+		const viewportBorderStyle = options.fullscreenBorderColor
+			? borderStyle(options.fullscreenBorderColor)
+			: (text: string) => theme.fg("border", text);
 		return new TuiAltScreen(terminal, options.showHardwareCursor, options.logDirectory, {
 			searchMatchStyle: (text) => theme.underline(styleSearchMatch(text)),
 			searchCurrentMatchStyle: (text) => theme.bold(theme.inverse(styleSearchMatch(text))),
@@ -36,6 +52,7 @@ export function createInteractiveTui(options: InteractiveTuiOptions): TuiMainScr
 			onRightClickPaste: options.onRightClickPaste,
 			copyOnSelect: options.fullscreenCopyOnSelect,
 			wheelScrollLines: options.fullscreenWheelScrollLines ?? "auto",
+			viewportBorderStyle,
 			copySelection: async (text) => {
 				try {
 					await copyToClipboard(text);

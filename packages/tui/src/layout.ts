@@ -192,6 +192,7 @@ function layoutComponent(
 					box,
 				),
 			);
+			entries[index]!.onLayout?.(safeWidth, sizes[index]!);
 			childY += sizes[index]! + node.gap;
 		}
 		return box;
@@ -381,16 +382,20 @@ export function renderLayoutFrame(
 	width: number,
 	height: number,
 	requestRender: () => void,
+	inset = 0,
 ): LayoutFrame {
 	const safeWidth = Math.max(1, Math.floor(width));
 	const safeHeight = Math.max(1, Math.floor(height));
+	const safeInset = Math.max(0, Math.floor(inset));
+	const contentWidth = Math.max(1, safeWidth - safeInset * 2);
+	const contentHeight = Math.max(1, safeHeight - safeInset * 2);
 	const context: LayoutContext = {
-		viewport: { width: safeWidth, height: safeHeight },
+		viewport: { width: contentWidth, height: contentHeight },
 		renderCache: new Map(),
 		requestRender,
 		primaryScrollView: undefined,
 	};
-	const rootBox = layoutComponent(context, root, 0, 0, safeWidth, safeHeight, {
+	const rootBox = layoutComponent(context, root, safeInset, safeInset, contentWidth, contentHeight, {
 		x: 0,
 		y: 0,
 		width: safeWidth,

@@ -196,6 +196,8 @@ export interface TuiAltScreenOptions {
 	 * via an OSC 52 write.
 	 */
 	copySelection?: (text: string) => Promise<boolean | string>;
+	/** Color a one-cell frame around the fullscreen viewport. */
+	viewportBorderStyle?: (text: string) => string;
 }
 
 /** Alternate-screen TUI with a scrollable, application-owned viewport. */
@@ -251,6 +253,8 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 	private readonly onRightClickPaste?: () => void;
 	private copyOnSelect: boolean;
 	private readonly copySelection?: (text: string) => Promise<boolean | string>;
+	private viewportBorderStyle: ((text: string) => string) | undefined;
+	private previousCursorShape = "\x1b[2 q";
 
 	constructor(
 		terminal: Terminal,
@@ -278,6 +282,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		this.onRightClickPaste = options.onRightClickPaste;
 		this.copyOnSelect = options.copyOnSelect ?? true;
 		this.copySelection = options.copySelection;
+		this.viewportBorderStyle = options.viewportBorderStyle;
 		this.addInputListener((data) => this.handleViewportInput(data));
 	}
 
@@ -316,6 +321,11 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 	/** The lines of the last rendered frame, one per terminal row, as written to the terminal. */
 	getScreenLines(): string[] {
 		return [...this.previousScreen];
+	}
+
+	setViewportBorderStyle(style: ((text: string) => string) | undefined): void {
+		this.viewportBorderStyle = style;
+		this.requestRender();
 	}
 
 	setLayoutRoot(component: Component | undefined): void {
@@ -669,6 +679,14 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		this.mousePressMoved = false;
 	}
 
+	private isInsideViewportBorder(x: number, y: number): boolean {
+		return (
+			this.layoutRoot !== undefined &&
+			this.viewportBorderStyle !== undefined &&
+			(x === 0 || x === this.terminal.columns - 1 || y === 0 || y === this.terminal.rows - 1)
+		);
+	}
+
 	private handleViewportInput(data: string): { consume?: boolean } | undefined {
 		if (data === FOCUS_OUT) {
 			const hadActiveSelection = this.selectionPressActive;
@@ -892,6 +910,17 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 	}
 
 	private handleMouseEvent(raw: SgrMouseEvent): void {
+		if (this.isInsideViewportBorder(raw.x, raw.y)) {
+			if (this.selectionPressActive) {
+				this.handleSelectionMouseEvent({
+					...raw,
+					x: Math.max(1, Math.min(this.terminal.columns - 2, raw.x)),
+					y: Math.max(1, Math.min(this.terminal.rows - 2, raw.y)),
+				});
+			}
+			if (raw.release) this.clearComponentMouseGesture();
+			return;
+		}
 		const isMotion = (raw.button & 32) !== 0;
 		const type: TuiMouseEvent["type"] = raw.release
 			? "release"
@@ -1442,7 +1471,15 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		const lines: string[] = [];
 		for (let row = selection.start.row; row <= selection.end.row; row++) {
 			const line = sourceLines[row] ?? "";
-			const columns = this.getSelectionColumns(line, row, selection);
+			const columns = this.getSelectionColumns(
+				line,
+				row,
+				selection,
+				!selection.start.scrollView && this.viewportBorderStyle && this.layoutRoot ? 1 : 0,
+				!selection.start.scrollView && this.viewportBorderStyle && this.layoutRoot
+					? this.terminal.columns - 1
+					: visibleWidth(line),
+			);
 			lines.push(
 				stripTerminalSequences(
 					sliceByColumn(line, columns.start, Math.max(0, columns.end - columns.start), true),
@@ -1594,6 +1631,10 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 			maxRow = Math.min(screen.length - 1, box.rect.y + box.rect.height - 1, box.clip.y + box.clip.height - 1);
 			minColumn = Math.max(0, box.rect.x, box.clip.x);
 			maxColumn = Math.min(this.terminal.columns, box.rect.x + box.rect.width, box.clip.x + box.clip.width);
+			if (this.viewportBorderStyle && this.layoutRoot) {
+				minColumn = Math.max(1, minColumn);
+				maxColumn = Math.min(this.terminal.columns - 1, maxColumn);
+			}
 			screenSelection = {
 				start: {
 					...selection.start,
@@ -1655,6 +1696,19 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		return result;
 	}
 
+	private compositeViewportBorder(screen: string[], width: number, height: number): string[] {
+		const style = this.viewportBorderStyle;
+		if (!style || width < 2 || height < 2) return screen;
+		const result = [...screen];
+		result[0] = style(`┌${"─".repeat(Math.max(0, width - 2))}┐`);
+		result[height - 1] = style(`└${"─".repeat(Math.max(0, width - 2))}┘`);
+		for (let row = 1; row < height - 1; row++) {
+			result[row] = compositeTuiLine(result[row] ?? "", style("│"), 0, 1, width);
+			result[row] = compositeTuiLine(result[row] ?? "", style("│"), width - 1, 1, width);
+		}
+		return result;
+	}
+
 	private compositeFlashes(screen: string[], width: number, height: number): string[] {
 		const flashLines = this.flashes.render(width).slice(-height);
 		if (flashLines.length === 0) return screen;
@@ -1674,9 +1728,10 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		const width = Math.max(1, this.terminal.columns);
 		const height = Math.max(1, this.terminal.rows);
 		const root = this.layoutRoot ?? this.implicitScrollView;
-		let nextLayout = renderLayoutFrame(root, width, height, () => this.requestRender());
+		const inset = this.layoutRoot && this.viewportBorderStyle ? 1 : 0;
+		let nextLayout = renderLayoutFrame(root, width, height, () => this.requestRender(), inset);
 		if (this.refreshSearch(nextLayout)) {
-			nextLayout = renderLayoutFrame(root, width, height, () => this.requestRender());
+			nextLayout = renderLayoutFrame(root, width, height, () => this.requestRender(), inset);
 		}
 		let screen = nextLayout.lines.map((line) => line.replace(OSC133_ZONE_PREFIX, ""));
 		screen = this.applySearchHighlights(screen, nextLayout);
@@ -1685,8 +1740,12 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		if (screen.length > height) screen = screen.slice(screen.length - height);
 		screen = this.applySelection(screen, nextLayout);
 		screen = this.compositeFlashes(screen, width, height);
-
 		const cursorPos = this.extractCursorPosition(screen, height);
+		if (this.layoutRoot && this.viewportBorderStyle) screen = this.compositeViewportBorder(screen, width, height);
+		if (cursorPos && this.layoutRoot && this.viewportBorderStyle) {
+			cursorPos.row = Math.max(1, Math.min(height - 2, cursorPos.row));
+			cursorPos.col = Math.max(1, Math.min(width - 2, cursorPos.col));
+		}
 		screen = this.applyLineResets(screen).map((line) => {
 			if (isImageLine(line) || visibleWidth(line) <= width) return line;
 			return sliceByColumn(line, 0, width, true);
@@ -1763,6 +1822,11 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 
 		if (cursorPos) {
 			buffer += `\x1b[${cursorPos.row + 1};${Math.min(width, cursorPos.col) + 1}H`;
+			const cursorShape = this.getCursorStyleSequence();
+			if (cursorShape !== this.previousCursorShape) {
+				buffer += cursorShape;
+				this.previousCursorShape = cursorShape;
+			}
 			buffer += this.getShowHardwareCursor() ? "\x1b[?25h" : "\x1b[?25l";
 		} else {
 			buffer += "\x1b[?25l";

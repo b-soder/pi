@@ -461,6 +461,8 @@ export interface TUI extends Component {
 	clear(): void;
 	getShowHardwareCursor(): boolean;
 	setShowHardwareCursor(enabled: boolean): void;
+	setCursorStyle(style: "block" | "underline" | "bar"): void;
+	getCursorStyleSequence(): string;
 	getClearOnShrink(): boolean;
 	setClearOnShrink(enabled: boolean): void;
 	setFocus(component: Component | null): void;
@@ -506,6 +508,7 @@ export abstract class TuiBase extends Container implements TUI {
 	private lastRenderAt = 0;
 	private static readonly MIN_RENDER_INTERVAL_MS = 16;
 	private showHardwareCursor = false;
+	private cursorStyle: "block" | "underline" | "bar" = "block";
 	private clearOnShrink = false;
 	protected fullRedrawCount = 0;
 	protected stopped = false;
@@ -556,6 +559,16 @@ export abstract class TuiBase extends Container implements TUI {
 
 	getShowHardwareCursor(): boolean {
 		return this.showHardwareCursor;
+	}
+
+	setCursorStyle(style: "block" | "underline" | "bar"): void {
+		if (this.cursorStyle === style) return;
+		this.cursorStyle = style;
+		this.requestRender();
+	}
+
+	getCursorStyleSequence(): string {
+		return `\x1b[${this.cursorStyle === "underline" ? 4 : this.cursorStyle === "bar" ? 6 : 2} q`;
 	}
 
 	setShowHardwareCursor(enabled: boolean): void {

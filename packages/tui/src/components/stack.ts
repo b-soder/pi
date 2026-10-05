@@ -8,6 +8,7 @@ export interface StackEntryOptions {
 	minSize?: number;
 	maxSize?: number;
 	visible?: (viewport: LayoutViewport) => boolean;
+	onLayout?: (width: number, height: number) => void;
 }
 
 export interface StackEntry extends StackEntryOptions {
@@ -55,6 +56,7 @@ export abstract class Stack extends Container {
 			...(options.minSize === undefined ? {} : { minSize: normalizeSize(options.minSize, 0) }),
 			...(options.maxSize === undefined ? {} : { maxSize: normalizeSize(options.maxSize, Number.MAX_SAFE_INTEGER) }),
 			...(options.visible === undefined ? {} : { visible: options.visible }),
+			...(options.onLayout === undefined ? {} : { onLayout: options.onLayout }),
 		});
 	}
 

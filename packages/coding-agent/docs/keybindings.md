@@ -39,7 +39,7 @@ Write a key as `modifier+key`. Modifiers are `ctrl`, `shift`, `alt`, and `super`
 
 Examples: `ctrl+shift+x`, `alt+ctrl+x`, `ctrl+shift+alt+x`, `super+k`, `ctrl+super+k`, and `ctrl+1`.
 
-`super` bindings require a terminal that reports the modifier separately, typically through the Kitty keyboard protocol. They may not work in terminals without that support.
+`super` bindings require a terminal that reports the modifier separately, typically through the Kitty keyboard protocol. They may not work in terminals without that support. If global CSI-u reporting is disabled (for example, in iTerm2), configure per-key mappings to send the matching CSI-u sequence; `super+escape` is `\x1b[27;9u`.
 
 ## Actions
 
@@ -121,6 +121,7 @@ In fullscreen mode, these actions control the transcript and take precedence ove
 | Keybinding id | Default | Description |
 |--------|---------|-------------|
 | `app.interrupt` | `escape` | Cancel / abort |
+| `app.input.interrupt` | `super+escape` | Interrupt Pi from either fullscreen input; closes an open overlay first |
 | `app.clear` | `ctrl+c` | Clear editor (first) / exit (second) |
 | `app.exit` | `ctrl+d` | Exit (when editor empty) |
 | `app.suspend` | `ctrl+z` (None on Windows) | Suspend to background |

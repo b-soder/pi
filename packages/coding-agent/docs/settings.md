@@ -92,7 +92,11 @@ See [Compaction Reference](compaction.md) for trigger, summarization, and valida
 | `theme` | string | `"system"` | Built-in or custom theme name. `system` derives colors from the terminal theme. |
 | `quietStartup` | boolean \| `"header"` | `false` | `true` hides the startup header and loaded-resource listing. `"header"` keeps the header (version and key hints) but hides the model scope line and loaded-resource listing. |
 | `tuiMode` | `"regular" \| "fullscreen"` | `"fullscreen"` | Interactive terminal UI mode. |
-| `experimentalTuiLayout` | `"standard" \| "four-panel"` | `"standard"` | Experimental fullscreen layout with separate tool output, conversation, input, and status panels. Configure through `/settings`; restart Pi to apply. |
+| `experimentalTuiLayout` | `"standard" \| "four-panel"` | `"standard"` | Experimental fullscreen layout with separate tool output, conversation, embedded Neovim viewport, input, and status panels. Configure through `/settings`; restart Pi to apply. |
+
+In the experimental fullscreen layout, `/input orig|o`, `/input nvim|vi|n`, and `/input both|b` choose which input panels are visible. New sessions start with the original input only. `⌘-/` toggles between Neovim-only and both panels and moves focus; the Neovim instance stays alive when hidden. The two drafts synchronize in either direction, including while a panel is hidden. Draft text, panel visibility, and Neovim insert/normal mode are saved beside a persisted session and restored on resume. If an otherwise-empty persisted session needs to save non-default input state, Pi creates its session header; non-persistent sessions remain in memory. Flushing from Neovim uses Pi's normal input handler, so Pi slash commands still run through the original input path.
+
+In fullscreen mode, `/border #RRGGBB` sets the one-cell frame color; `/border default` restores the default gray. `/border` with no argument reports the current color.
 | `fullscreenExitOutput` | `"transcript" \| "resume-hint"` | `"transcript"` | Output printed when fullscreen mode exits. |
 | `fullscreenScrollbar` | `"auto" \| "always" \| "hidden"` | `"auto"` | Fullscreen transcript scrollbar behavior. |
 | `fullscreenCopyOnSelect` | boolean | `true` | Copy selected text automatically in fullscreen mode. |

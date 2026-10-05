@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
 type FakeUi = {
@@ -13,6 +14,20 @@ type HandleCtrlZThis = {
 
 type ProcessSignalHandler = () => void;
 
+type PanelInputUi = {
+	hasOverlay: () => boolean;
+	getFocusedComponent: () => object | null;
+};
+
+type HandlePanelInputThis = {
+	keybindings: KeybindingsManager;
+	nvimViewportContainer: object;
+	handleCtrlZ: () => void;
+	handlePiInterrupt?: () => void;
+	toggleInputPanel: () => void;
+	cycleModel?: (direction: "forward" | "backward") => void;
+};
+
 type InteractiveModePrototypeWithHandleCtrlZ = {
 	handleCtrlZ(this: HandleCtrlZThis): void;
 };
@@ -23,7 +38,113 @@ function callHandleCtrlZ(context: HandleCtrlZThis): void {
 
 const interactiveModePrototype = InteractiveMode.prototype as unknown;
 
+function callHandlePanelInput(
+	context: HandlePanelInputThis,
+	data: string,
+	ui: PanelInputUi,
+): { consume?: true; data?: string } | undefined {
+	const prototype = interactiveModePrototype as {
+		handlePanelInput(
+			this: HandlePanelInputThis,
+			data: string,
+			tui: PanelInputUi,
+		): { consume?: true; data?: string } | undefined;
+	};
+	return prototype.handlePanelInput.call(context, data, ui);
+}
+
 describe("InteractiveMode.handleCtrlZ", () => {
+	test("leaves Command-Ctrl-P for embedded Neovim instead of treating it as a Pi action", () => {
+		const nvim = {};
+		const cycleModel = vi.fn();
+		const context: HandlePanelInputThis = {
+			keybindings: new KeybindingsManager(),
+			nvimViewportContainer: nvim,
+			handleCtrlZ: vi.fn(),
+			handlePiInterrupt: vi.fn(),
+			toggleInputPanel: vi.fn(),
+			cycleModel,
+		};
+		const ui: PanelInputUi = { hasOverlay: () => false, getFocusedComponent: () => nvim };
+
+		expect(callHandlePanelInput(context, "\x1b[112;13u", ui)).toBeUndefined();
+		expect(cycleModel).not.toHaveBeenCalled();
+	});
+
+	test("turns Command-Escape into overlay Escape without interrupting Pi", () => {
+		const nvim = {};
+		const handlePiInterrupt = vi.fn();
+		const context: HandlePanelInputThis = {
+			keybindings: new KeybindingsManager(),
+			nvimViewportContainer: nvim,
+			handleCtrlZ: vi.fn(),
+			handlePiInterrupt,
+			toggleInputPanel: vi.fn(),
+		};
+		const ui: PanelInputUi = { hasOverlay: () => true, getFocusedComponent: () => nvim };
+
+		expect(context.keybindings.getKeys("app.input.interrupt")).toEqual(["super+escape"]);
+		expect(context.keybindings.matches("\x1b[27;9u", "app.input.interrupt")).toBe(true);
+		expect(callHandlePanelInput(context, "\x1b[27;9u", ui)).toEqual({ data: "\x1b" });
+		expect(handlePiInterrupt).not.toHaveBeenCalled();
+	});
+
+	test("consumes Command-/ without switching panels while an overlay is open", () => {
+		const nvim = {};
+		const toggleInputPanel = vi.fn();
+		const context: HandlePanelInputThis = {
+			keybindings: new KeybindingsManager(),
+			nvimViewportContainer: nvim,
+			handleCtrlZ: vi.fn(),
+			handlePiInterrupt: vi.fn(),
+			toggleInputPanel,
+		};
+		const ui: PanelInputUi = { hasOverlay: () => true, getFocusedComponent: () => nvim };
+
+		expect(context.keybindings.matches("\x1b[47;9u", "app.input.toggle")).toBe(true);
+		expect(callHandlePanelInput(context, "\x1b[47;9u", ui)).toEqual({ consume: true });
+		expect(toggleInputPanel).not.toHaveBeenCalled();
+		expect(context.handlePiInterrupt).not.toHaveBeenCalled();
+	});
+
+	test("routes Ctrl-Z from the focused embedded Neovim panel to Pi suspend", () => {
+		const nvim = {};
+		const handleCtrlZ = vi.fn();
+		const toggleInputPanel = vi.fn();
+		const context: HandlePanelInputThis = {
+			keybindings: new KeybindingsManager(),
+			nvimViewportContainer: nvim,
+			handleCtrlZ,
+			toggleInputPanel,
+		};
+		const ui: PanelInputUi = {
+			hasOverlay: () => false,
+			getFocusedComponent: () => nvim,
+		};
+
+		expect(callHandlePanelInput(context, "\x1a", ui)).toEqual({ consume: true });
+		expect(handleCtrlZ).toHaveBeenCalledOnce();
+		expect(toggleInputPanel).not.toHaveBeenCalled();
+	});
+
+	test("leaves Ctrl-Z for an open overlay instead of suspending Pi", () => {
+		const nvim = {};
+		const handleCtrlZ = vi.fn();
+		const context: HandlePanelInputThis = {
+			keybindings: new KeybindingsManager(),
+			nvimViewportContainer: nvim,
+			handleCtrlZ,
+			toggleInputPanel: vi.fn(),
+		};
+		const ui: PanelInputUi = {
+			hasOverlay: () => true,
+			getFocusedComponent: () => nvim,
+		};
+
+		expect(callHandlePanelInput(context, "\x1a", ui)).toBeUndefined();
+		expect(handleCtrlZ).not.toHaveBeenCalled();
+	});
+
 	afterEach(() => {
 		vi.restoreAllMocks();
 	});

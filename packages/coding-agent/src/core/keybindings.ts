@@ -13,6 +13,7 @@ import { stripBom } from "../utils/text.ts";
 
 export interface AppKeybindings {
 	"app.interrupt": true;
+	"app.input.interrupt": true;
 	"app.clear": true;
 	"app.exit": true;
 	"app.suspend": true;
@@ -21,6 +22,7 @@ export interface AppKeybindings {
 	"app.model.cycleForward": true;
 	"app.model.cycleBackward": true;
 	"app.model.select": true;
+	"app.input.toggle": true;
 	"app.tools.expand": true;
 	"app.thinking.toggle": true;
 	"app.session.toggleNamedFilter": true;
@@ -91,6 +93,7 @@ export const KEYBINDINGS = {
 		defaultKeys: windowsKeybindings ? "ctrl+f" : "ctrl+shift+f",
 	},
 	"app.interrupt": { defaultKeys: "escape", description: "Cancel or abort" },
+	"app.input.interrupt": { defaultKeys: "super+escape", description: "Interrupt Pi from either input panel" },
 	"app.clear": { defaultKeys: "ctrl+c", description: "Clear editor" },
 	"app.exit": { defaultKeys: "ctrl+d", description: "Exit when editor is empty" },
 	"app.suspend": {
@@ -114,6 +117,7 @@ export const KEYBINDINGS = {
 		description: "Cycle to previous model",
 	},
 	"app.model.select": { defaultKeys: "ctrl+l", description: "Open model selector" },
+	"app.input.toggle": { defaultKeys: "super+/", description: "Toggle fullscreen input panel" },
 	"app.tools.expand": { defaultKeys: "ctrl+o", description: "Toggle tool output" },
 	"app.thinking.toggle": {
 		defaultKeys: "ctrl+t",
@@ -277,6 +281,7 @@ const KEYBINDING_NAME_MIGRATIONS = {
 	cycleModelForward: "app.model.cycleForward",
 	cycleModelBackward: "app.model.cycleBackward",
 	selectModel: "app.model.select",
+	toggleInputPanel: "app.input.toggle",
 	expandTools: "app.tools.expand",
 	toggleThinking: "app.thinking.toggle",
 	toggleSessionNamedFilter: "app.session.toggleNamedFilter",
