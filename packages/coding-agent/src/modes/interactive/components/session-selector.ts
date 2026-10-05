@@ -776,11 +776,13 @@ export class SessionSelectorComponent extends Container implements Focusable {
 			renameSession?: (sessionPath: string, currentName: string | undefined) => Promise<void>;
 			showRenameHint?: boolean;
 			keybindings?: KeybindingsManager;
+			initialNameFilter?: NameFilter;
 		},
 		currentSessionFilePath?: string,
 	) {
 		super();
 		this.keybindings = options?.keybindings ?? KeybindingsManager.create();
+		this.nameFilter = options?.initialNameFilter ?? "all";
 		this.currentSessionsLoader = currentSessionsLoader;
 		this.allSessionsLoader = allSessionsLoader;
 		this.requestRender = requestRender;

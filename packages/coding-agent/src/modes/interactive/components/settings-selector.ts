@@ -167,6 +167,13 @@ class WarningSettingsSubmenu extends Container {
 					(this.state.anthropicExtraUsage ?? SETTINGS_DEFAULTS.warnings.anthropicExtraUsage) ? "true" : "false",
 				values: ["true", "false"],
 			},
+			{
+				id: "tmux-extended-keys-format",
+				label: "tmux keyboard format",
+				description: "Warn when tmux uses xterm extended keys instead of CSI-u",
+				currentValue: (this.state.tmuxExtendedKeysFormat ?? true) ? "true" : "false",
+				values: ["true", "false"],
+			},
 		];
 
 		this.settingsList = new SettingsList(
@@ -177,6 +184,10 @@ class WarningSettingsSubmenu extends Container {
 				switch (id) {
 					case "anthropic-extra-usage":
 						this.state = { ...this.state, anthropicExtraUsage: newValue === "true" };
+						onChange({ ...this.state });
+						break;
+					case "tmux-extended-keys-format":
+						this.state = { ...this.state, tmuxExtendedKeysFormat: newValue === "true" };
 						onChange({ ...this.state });
 						break;
 				}

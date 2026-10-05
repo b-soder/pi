@@ -143,6 +143,7 @@ const MarkdownSettingsSchema = Type.Object({
 
 const WarningSettingsSchema = Type.Object({
 	anthropicExtraUsage: Type.Optional(Type.Boolean({ default: SETTINGS_DEFAULTS.warnings.anthropicExtraUsage })),
+	tmuxExtendedKeysFormat: Type.Optional(Type.Boolean({ default: SETTINGS_DEFAULTS.warnings.tmuxExtendedKeysFormat })),
 });
 
 function codemodeMode(options?: TSchemaOptions) {
