@@ -34,6 +34,7 @@ function createTreeUI() {
 		defaultEditor: { onEscape },
 		editor: { getText: () => "", setText: vi.fn() },
 		chatContainer: new Container(),
+		toolOutputContainer: new Container(),
 		isInitialized: true,
 		footer: { invalidate: vi.fn() },
 		ui: { terminal: { rows: 24, setProgress: vi.fn() }, requestRender: vi.fn() },

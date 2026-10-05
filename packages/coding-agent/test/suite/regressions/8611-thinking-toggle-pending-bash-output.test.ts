@@ -5,7 +5,11 @@ import { InteractiveMode } from "../../../src/modes/interactive/interactive-mode
 import { initTheme } from "../../../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../../../src/utils/ansi.ts";
 
-type UpdateThinkingBlockVisibility = (this: { chatContainer: Container; ui: TUI }) => void;
+type UpdateThinkingBlockVisibility = (this: {
+	chatContainer: Container;
+	toolOutputContainer: Container;
+	ui: TUI;
+}) => void;
 
 type ToggleThinkingBlockVisibility = (this: {
 	hideThinkingBlock: boolean;
@@ -51,6 +55,7 @@ describe("thinking visibility while a bash tool is running (#8611)", () => {
 			hideThinkingBlock: false,
 			settingsManager: { setHideThinkingBlock: vi.fn() },
 			chatContainer,
+			toolOutputContainer: new Container(),
 			ui,
 			updateThinkingBlockVisibility() {
 				updateThinkingBlockVisibility.call(this);

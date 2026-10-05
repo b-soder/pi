@@ -549,6 +549,7 @@ if (process.platform !== "win32") fs.chmodSync(piPath, 0o755);
 		const list = selector.getResourceList();
 		initTheme("dark");
 		expect(list.render(80).join("\n")).toContain("Built-in");
+		for (const key of "llama.cpp") list.handleInput(key);
 		expect(list.render(80).join("\n")).toContain("llama.cpp");
 		list.handleInput(" ");
 		expect(settingsManager.getGlobalSettings().extensions).toEqual(["-builtin:llama.cpp"]);
@@ -579,6 +580,7 @@ if (process.platform !== "win32") fs.chmodSync(piPath, 0o755);
 		);
 
 		const list = selector.getResourceList();
+		for (const key of "mcp") list.handleInput(key);
 		list.handleInput(" ");
 		expect(settingsManager.getProjectSettings().extensions).toEqual(["+builtin:mcp"]);
 		list.handleInput(" ");

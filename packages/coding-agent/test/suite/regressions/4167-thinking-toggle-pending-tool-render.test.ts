@@ -36,6 +36,8 @@ type RenderSessionItems = (
 type RenderSessionContextThis = {
 	pendingTools: Map<string, ToolExecutionComponent>;
 	chatContainer: Container;
+	toolOutputContainer: Container;
+	toolOutputEnabled: boolean;
 	footer: { invalidate(): void };
 	ui: TUI;
 	settingsManager: {
@@ -51,6 +53,7 @@ type RenderSessionContextThis = {
 	getRegisteredToolDefinition(toolName: string): undefined;
 	maybeShowAssistantDiagnostics(message: AssistantMessage): void;
 	addMessageToChat(message: AgentMessage, options?: { populateHistory?: boolean }): void;
+	addToolExecutionComponent(component: ToolExecutionComponent): void;
 	renderSessionItems: RenderSessionItems;
 };
 
@@ -67,6 +70,8 @@ function createFakeInteractiveModeThis(): RenderSessionContextThis {
 	return {
 		pendingTools: new Map<string, ToolExecutionComponent>(),
 		chatContainer,
+		toolOutputContainer: new Container(),
+		toolOutputEnabled: false,
 		footer: { invalidate: vi.fn() },
 		ui: { requestRender: vi.fn() } as unknown as TUI,
 		settingsManager: {
@@ -81,6 +86,11 @@ function createFakeInteractiveModeThis(): RenderSessionContextThis {
 		updateEditorBorderColor: vi.fn(),
 		getRegisteredToolDefinition: (_toolName: string) => undefined,
 		maybeShowAssistantDiagnostics: vi.fn(),
+		addToolExecutionComponent: (
+			InteractiveMode.prototype as unknown as {
+				addToolExecutionComponent(this: RenderSessionContextThis, component: ToolExecutionComponent): void;
+			}
+		).addToolExecutionComponent,
 		renderSessionItems: (InteractiveMode.prototype as unknown as { renderSessionItems: RenderSessionItems })
 			.renderSessionItems,
 		addMessageToChat(message: AgentMessage) {
