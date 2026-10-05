@@ -90,6 +90,7 @@ describe("matchesKey", () => {
 			setKittyProtocolActive(true);
 			assert.strictEqual(matchesKey("\x1b[107;9u", "super+k"), true);
 			assert.strictEqual(matchesKey("\x1b[13;9u", "super+enter"), true);
+			assert.strictEqual(matchesKey("\x1b[27;9u", "super+escape"), true);
 			assert.strictEqual(matchesKey("\x1b[107;13u", Key.ctrlSuper("k")), true);
 			assert.strictEqual(matchesKey("\x1b[107;13u", "ctrl+super+k"), true);
 			assert.strictEqual(matchesKey("\x1b[107;14u", "ctrl+shift+super+k"), true);

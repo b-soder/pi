@@ -9,11 +9,16 @@ import {
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 
+export type InputPanelMode = "orig" | "nvim" | "both";
+
 export interface ChatViewportOptions {
 	readonly document: Component;
 	readonly activity?: Component;
 	readonly dividerStatus?: (width: number) => string | undefined;
 	readonly toolOutput?: Component;
+	readonly nvimViewport?: Component;
+	readonly getInputMode?: () => InputPanelMode;
+	readonly onNvimViewportLayout?: (width: number, height: number) => void;
 	readonly fourPanel?: boolean;
 	readonly pendingMessages: Component;
 	readonly status: Component;
@@ -112,11 +117,10 @@ class ResizablePanelStack extends VStack {
 	private readonly getInputHeight: (width: number) => number;
 	private readonly getFooterHeight: (width: number) => number;
 	private readonly dividerStatus: DividerStatus | undefined;
+	private readonly getInputMode: () => InputPanelMode;
+	private readonly hasNvimPanel: boolean;
 	private inputExtraHeight = 0;
 	private footerExtraHeight = 0;
-	private lastInputHeight = 0;
-	private lastFooterHeight = 0;
-	private lastTerminalRows: number | undefined;
 
 	constructor(options: {
 		panels: readonly Component[];
@@ -126,6 +130,8 @@ class ResizablePanelStack extends VStack {
 		panelGrowth: readonly number[];
 		getInputHeight: (width: number) => number;
 		getFooterHeight: (width: number) => number;
+		getInputMode?: () => InputPanelMode;
+		onPanelLayout?: (width: number, height: number) => void;
 		getTerminalRows: () => number;
 		getTerminalColumns: () => number;
 	}) {
@@ -136,6 +142,8 @@ class ResizablePanelStack extends VStack {
 		this.getInputHeight = options.getInputHeight;
 		this.getFooterHeight = options.getFooterHeight;
 		this.dividerStatus = options.dividerStatus ? new DividerStatus(options.dividerStatus) : undefined;
+		this.getInputMode = options.getInputMode ?? (() => "both");
+		this.hasNvimPanel = options.panels.length === 5;
 		this.getTerminalRows = options.getTerminalRows;
 		this.getTerminalColumns = options.getTerminalColumns;
 
@@ -144,18 +152,23 @@ class ResizablePanelStack extends VStack {
 			this.addChild(options.panels[index]!, {
 				basis: this.panelBases[index],
 				grow: 0,
-				shrink: index >= 2 ? 0 : 1,
+				shrink: options.panels.length === 5 && index === 2 ? 1 : index >= 2 ? 0 : 1,
 				minSize: this.panelMinSizes[index],
+				...(options.onPanelLayout && index === 2
+					? { onLayout: (width: number, height: number) => options.onPanelLayout?.(width, height) }
+					: {}),
 				visible: (viewport: { width: number; height: number }) => {
-					this.syncPanelSizes(viewport.width, viewport.height);
-					return true;
+					this.syncPanelSizes(viewport.width, Math.min(viewport.height, this.getTerminalRows()));
+					return this.isPanelVisible(index);
 				},
 			});
 			if (index < options.panels.length - 1) {
 				this.addChild(
 					new PanelDivider(
-						(delta) => this.resizeDivider(index, delta),
-						index === 1 && this.dividerStatus ? (width) => this.dividerStatus!.render(width)[0] : undefined,
+						(delta) => this.resizeDivider(index, this.getNextVisiblePanel(index), delta),
+						this.dividerStatus && this.hasDividerStatus(index)
+							? (width) => this.dividerStatus!.render(width)[0]
+							: undefined,
 					),
 					{
 						basis: 1,
@@ -163,49 +176,82 @@ class ResizablePanelStack extends VStack {
 						shrink: 0,
 						minSize: 1,
 						maxSize: 1,
+						visible: () => this.isDividerVisible(index),
 					},
 				);
 			}
 		}
 	}
 
+	private isPanelVisible(index: number): boolean {
+		const mode = this.getInputMode();
+		const inputIndex = this.hasNvimPanel ? 3 : 2;
+		const nvimIndex = this.hasNvimPanel ? 2 : -1;
+		if (index === inputIndex) return mode !== "nvim";
+		if (index === nvimIndex) return mode !== "orig";
+		return true;
+	}
+
+	private getNextVisiblePanel(index: number): number {
+		let next = index + 1;
+		while (next < this.panelBases.length && !this.isPanelVisible(next)) next++;
+		return next;
+	}
+
+	private isDividerVisible(index: number): boolean {
+		return this.isPanelVisible(index) && this.getNextVisiblePanel(index) < this.panelBases.length;
+	}
+
+	private hasDividerStatus(index: number): boolean {
+		if (!this.hasNvimPanel) return index === 1;
+		const mode = this.getInputMode();
+		return mode === "both" ? index === 2 : index === 1;
+	}
+
 	private syncPanelSizes(width: number, height: number): void {
 		const naturalInputHeight = this.getInputHeight(width);
 		const naturalFooterHeight = this.getFooterHeight(width);
-		if (!this.panelSizes) {
-			const sizes = [...this.panelBases];
-			sizes[2] = naturalInputHeight;
-			sizes[sizes.length - 1] = naturalFooterHeight;
-			this.adjustFlexiblePanelSizes(sizes, height - (sizes.length - 1) - sizes.reduce((sum, size) => sum + size, 0));
-			this.panelSizes = sizes;
-		} else {
-			const inputIndex = 2;
-			const footerIndex = this.panelSizes.length - 1;
-			const inputChange = naturalInputHeight - this.lastInputHeight;
-			const footerChange = naturalFooterHeight - this.lastFooterHeight;
-			const rowChange = height - (this.lastTerminalRows ?? height);
-			this.panelSizes[1] += rowChange;
-			this.panelSizes[inputIndex] = naturalInputHeight + this.inputExtraHeight;
-			this.panelSizes[footerIndex] = naturalFooterHeight + this.footerExtraHeight;
-			this.adjustFlexiblePanelSizes(this.panelSizes, -inputChange - footerChange);
+		if (!this.panelSizes) this.panelSizes = [...this.panelBases];
+
+		const inputIndex = this.panelSizes.length - 2;
+		const footerIndex = this.panelSizes.length - 1;
+		this.panelSizes[inputIndex] = naturalInputHeight + this.inputExtraHeight;
+		this.panelSizes[footerIndex] = naturalFooterHeight + this.footerExtraHeight;
+
+		const visibleIndexes = this.panelSizes.map((_, index) => index).filter((index) => this.isPanelVisible(index));
+		let visibleDividerCount = 0;
+		for (const index of visibleIndexes) {
+			if (this.getNextVisiblePanel(index) < this.panelSizes.length) visibleDividerCount++;
 		}
-		this.lastInputHeight = naturalInputHeight;
-		this.lastFooterHeight = naturalFooterHeight;
-		this.lastTerminalRows = height;
+		const visibleSizes = visibleIndexes.map((index) => this.panelSizes![index]!);
+		const usedHeight = visibleSizes.reduce((sum, size) => sum + size, 0) + visibleDividerCount;
+		this.adjustFlexiblePanelSizes(visibleSizes, height - usedHeight, visibleIndexes);
+		for (let index = 0; index < visibleIndexes.length; index++) {
+			this.panelSizes[visibleIndexes[index]!] = visibleSizes[index]!;
+		}
+
 		for (let index = 0; index < this.panelSizes.length; index++) {
-			this.entries[this.panelEntryIndexes[index]!]!.basis = this.panelSizes[index]!;
+			const entry = this.entries[this.panelEntryIndexes[index]!]!;
+			entry.basis = this.isPanelVisible(index) ? this.panelSizes[index]! : 0;
+			entry.minSize = this.isPanelVisible(index) ? this.panelMinSizes[index]! : 0;
 		}
 	}
 
-	private adjustFlexiblePanelSizes(sizes: number[], delta: number): void {
-		const flexibleIndexes = [0, 1];
+	private adjustFlexiblePanelSizes(
+		sizes: number[],
+		delta: number,
+		panelIndexes: readonly number[] = sizes.map((_, index) => index),
+	): void {
+		const flexibleIndexes = panelIndexes
+			.map((panelIndex, index) => ({ panelIndex, index }))
+			.filter(({ panelIndex }) => this.panelGrowth[panelIndex]! > 0);
 		let remaining = delta;
 		while (remaining > 0) {
-			const totalWeight = flexibleIndexes.reduce((sum, index) => sum + this.panelGrowth[index]!, 0);
+			const totalWeight = flexibleIndexes.reduce((sum, { panelIndex }) => sum + this.panelGrowth[panelIndex]!, 0);
 			let distributed = 0;
-			for (const index of flexibleIndexes) {
+			for (const { panelIndex, index } of flexibleIndexes) {
 				if (remaining <= 0) break;
-				const amount = Math.max(1, Math.floor((remaining * this.panelGrowth[index]!) / totalWeight));
+				const amount = Math.max(1, Math.floor((remaining * this.panelGrowth[panelIndex]!) / totalWeight));
 				sizes[index] = sizes[index]! + amount;
 				remaining -= amount;
 				distributed += amount;
@@ -213,15 +259,17 @@ class ResizablePanelStack extends VStack {
 			if (distributed === 0) break;
 		}
 		while (remaining < 0) {
-			const available = flexibleIndexes.filter((index) => sizes[index]! > this.panelMinSizes[index]!);
+			const available = flexibleIndexes.filter(
+				({ panelIndex, index }) => sizes[index]! > this.panelMinSizes[panelIndex]!,
+			);
 			if (available.length === 0) break;
-			const totalWeight = available.reduce((sum, index) => sum + this.panelGrowth[index]!, 0);
+			const totalWeight = available.reduce((sum, { panelIndex }) => sum + this.panelGrowth[panelIndex]!, 0);
 			let distributed = 0;
-			for (const index of available) {
+			for (const { panelIndex, index } of available) {
 				if (remaining >= 0) break;
 				const amount = Math.min(
-					sizes[index]! - this.panelMinSizes[index]!,
-					Math.max(1, Math.floor((-remaining * this.panelGrowth[index]!) / totalWeight)),
+					sizes[index]! - this.panelMinSizes[panelIndex]!,
+					Math.max(1, Math.floor((-remaining * this.panelGrowth[panelIndex]!) / totalWeight)),
 				);
 				sizes[index] = sizes[index]! - amount;
 				remaining += amount;
@@ -231,26 +279,28 @@ class ResizablePanelStack extends VStack {
 		}
 	}
 
-	private resizeDivider(index: number, delta: number): void {
+	private resizeDivider(index: number, nextIndex: number, delta: number): void {
 		this.syncPanelSizes(this.getTerminalColumns(), this.getTerminalRows());
 		const sizes = this.panelSizes!;
+		const inputIndex = sizes.length - 2;
+		const footerIndex = sizes.length - 1;
 		const lowerMinimum =
-			index + 1 === 2
+			nextIndex === inputIndex
 				? this.getInputHeight(this.getTerminalColumns())
-				: index + 1 === sizes.length - 1
+				: nextIndex === footerIndex
 					? this.getFooterHeight(this.getTerminalColumns())
-					: this.panelMinSizes[index + 1]!;
+					: this.panelMinSizes[nextIndex]!;
 		const applied = Math.max(
 			this.panelMinSizes[index]! - sizes[index]!,
-			Math.min(sizes[index + 1]! - lowerMinimum, delta),
+			Math.min(sizes[nextIndex]! - lowerMinimum, delta),
 		);
 		if (applied === 0) return;
 		sizes[index] = sizes[index]! + applied;
-		sizes[index + 1] = sizes[index + 1]! - applied;
+		sizes[nextIndex] = sizes[nextIndex]! - applied;
 		this.entries[this.panelEntryIndexes[index]!]!.basis = sizes[index];
-		this.entries[this.panelEntryIndexes[index + 1]!]!.basis = sizes[index + 1];
-		if (index === 1) this.inputExtraHeight -= applied;
-		if (index + 1 === sizes.length - 1) this.footerExtraHeight -= applied;
+		this.entries[this.panelEntryIndexes[nextIndex]!]!.basis = sizes[nextIndex];
+		if (nextIndex === inputIndex) this.inputExtraHeight -= applied;
+		if (nextIndex === footerIndex) this.footerExtraHeight -= applied;
 		this.invalidate();
 	}
 }
@@ -280,19 +330,20 @@ export function createChatViewport(options: ChatViewportOptions): ChatViewport {
 			{ component: options.editor, shrink: 1, minSize: 1 },
 		]);
 		const footer = new VStack([{ component: options.footer, shrink: 1, minSize: 0 }]);
+		const width = options.getTerminalColumns?.() ?? 80;
+		const naturalInputHeight = input.render(width).length;
+		const naturalFooterHeight = footer.render(width).length;
+		const panels = [toolOutput, transcript, ...(options.nvimViewport ? [options.nvimViewport] : []), input, footer];
 		const root = new ResizablePanelStack({
-			panels: [toolOutput, transcript, input, footer],
+			panels,
 			dividerStatus: options.dividerStatus,
-			panelMinSizes: [3, 3, 1, footer.render(options.getTerminalColumns?.() ?? 80).length],
-			panelBases: [
-				8,
-				12,
-				input.render(options.getTerminalColumns?.() ?? 80).length,
-				footer.render(options.getTerminalColumns?.() ?? 80).length,
-			],
-			panelGrowth: [3, 7, 0, 0],
+			panelMinSizes: [3, 3, ...(options.nvimViewport ? [3] : []), 1, naturalFooterHeight],
+			panelBases: [8, 12, ...(options.nvimViewport ? [5] : []), naturalInputHeight, naturalFooterHeight],
+			panelGrowth: [3, 7, ...(options.nvimViewport ? [0] : []), 0, 0],
 			getInputHeight: (width) => input.render(width).length,
 			getFooterHeight: (width) => footer.render(width).length,
+			getInputMode: options.getInputMode,
+			onPanelLayout: options.onNvimViewportLayout,
 			getTerminalRows: options.getTerminalRows ?? (() => 24),
 			getTerminalColumns: options.getTerminalColumns ?? (() => 80),
 		});
