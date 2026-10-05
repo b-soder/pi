@@ -24,6 +24,8 @@ See [Choose a Model](models.md) for model selection and thinking controls.
 
 ## Interaction
 
+The `/settings` > Warnings submenu includes the tmux extended-key-format warning. Turn off "tmux keyboard format" to acknowledge and suppress Pi's advisory about `extended-keys-format=xterm` on this machine; this does not change tmux or terminal key reporting. You can re-enable it there later.
+
 | Setting | Type | Default | Description |
 |---|---|---|---|
 | `steeringMode` | `"all" \| "one-at-a-time"` | `"one-at-a-time"` | How queued steering messages are delivered. |

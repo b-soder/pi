@@ -31,7 +31,7 @@ import { processFileArguments } from "./cli/file-processor.ts";
 import { buildInitialMessage } from "./cli/initial-message.ts";
 import { listModels } from "./cli/list-models.ts";
 import { createProjectTrustContext } from "./cli/project-trust.ts";
-import { selectSession } from "./cli/session-picker.ts";
+import { hideObservationalMemoryWorkerSessions, selectSession } from "./cli/session-picker.ts";
 import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
 import { APP_NAME, ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, VERSION } from "./config.ts";
 import { type CreateAgentSessionRuntimeFactory, createAgentSessionRuntime } from "./core/agent-session-runtime.ts";
@@ -416,7 +416,9 @@ export async function createSessionManager(
 		try {
 			const selectedPath = await selectSession(
 				(onProgress, signal) => SessionManager.list(cwd, sessionDir, onProgress, signal),
-				(onProgress, signal) => SessionManager.listAll(sessionDir, onProgress, signal),
+				hideObservationalMemoryWorkerSessions((onProgress, signal) =>
+					SessionManager.listAll(sessionDir, onProgress, signal),
+				),
 				settingsManager,
 			);
 			if (!selectedPath) {

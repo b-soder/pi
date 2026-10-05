@@ -28,10 +28,16 @@ type StartupSubmitContext = {
 	showStatus: (message: string) => void;
 };
 
+type TmuxWarningContext = {
+	settingsManager: { getWarnings: () => { tmuxExtendedKeysFormat?: boolean } };
+	showWarning: (message: string) => void;
+};
+
 type InteractiveModePrivate = {
 	handleStartupSubmit(this: StartupSubmitContext, text: string): void;
 	setupEditorSubmitHandler(this: SubmitContext): void;
 	getUserInput(this: InputContext): Promise<string>;
+	showTmuxKeyboardSetupWarning(this: TmuxWarningContext, warning: string | undefined): void;
 };
 
 const interactiveModePrototype = InteractiveMode.prototype as unknown as InteractiveModePrivate;
@@ -76,6 +82,32 @@ describe("InteractiveMode startup input", () => {
 		expect(context.pendingUserInputs).toEqual(["early prompt"]);
 		expect(context.flushPendingBashComponents).toHaveBeenCalledTimes(1);
 		expect(context.editor.addToHistory).toHaveBeenCalledWith("early prompt");
+	});
+
+	it("shows the tmux keyboard warning unless it was acknowledged off", () => {
+		const warning = "tmux extended-keys-format is xterm";
+		const showWarning = vi.fn();
+		const context: TmuxWarningContext = {
+			settingsManager: { getWarnings: () => ({ tmuxExtendedKeysFormat: false }) },
+			showWarning,
+		};
+
+		interactiveModePrototype.showTmuxKeyboardSetupWarning.call(context, warning);
+		expect(showWarning).not.toHaveBeenCalled();
+
+		context.settingsManager.getWarnings = () => ({ tmuxExtendedKeysFormat: true });
+		interactiveModePrototype.showTmuxKeyboardSetupWarning.call(context, warning);
+		expect(showWarning).toHaveBeenCalledWith(warning);
+	});
+
+	it("does not show an absent tmux warning", () => {
+		const showWarning = vi.fn();
+		const context: TmuxWarningContext = {
+			settingsManager: { getWarnings: () => ({}) },
+			showWarning,
+		};
+		interactiveModePrototype.showTmuxKeyboardSetupWarning.call(context, undefined);
+		expect(showWarning).not.toHaveBeenCalled();
 	});
 
 	it("returns queued startup input before installing a new input callback", async () => {

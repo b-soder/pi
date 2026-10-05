@@ -1238,11 +1238,7 @@ export class InteractiveMode {
 			});
 
 		// Check tmux keyboard setup asynchronously
-		this.checkTmuxKeyboardSetup().then((warning) => {
-			if (warning) {
-				this.showWarning(warning);
-			}
-		});
+		this.checkTmuxKeyboardSetup().then((warning) => this.showTmuxKeyboardSetupWarning(warning));
 
 		// Show startup warnings
 		const {
@@ -1336,6 +1332,11 @@ export class InteractiveMode {
 		} catch {
 			return [];
 		}
+	}
+
+	private showTmuxKeyboardSetupWarning(warning: string | undefined): void {
+		if (!warning || this.settingsManager.getWarnings().tmuxExtendedKeysFormat === false) return;
+		this.showWarning(warning);
 	}
 
 	private async checkTmuxKeyboardSetup(): Promise<string | undefined> {

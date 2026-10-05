@@ -11,6 +11,27 @@ import { createStartupTui, startStartupTui } from "./startup-ui.ts";
 
 type SessionsLoader = (onProgress?: SessionListProgress, signal?: AbortSignal) => Promise<SessionInfo[]>;
 
+// The bundled OM workers pass these reserved names with `pi -n`.
+const OM_WORKER_SESSION_NAME = /^om-(?:observer|consolidator)-/;
+
+export function isObservationalMemoryWorkerSession(session: SessionInfo): boolean {
+	return OM_WORKER_SESSION_NAME.test(session.name ?? "");
+}
+
+export function hideObservationalMemoryWorkerSessions(loader: SessionsLoader): SessionsLoader {
+	return async (onProgress, signal) => {
+		const filteredProgress: SessionListProgress | undefined = onProgress
+			? (loaded, total, partialSessions) =>
+					onProgress(
+						loaded,
+						total,
+						partialSessions?.filter((session) => !isObservationalMemoryWorkerSession(session)),
+					)
+			: undefined;
+		return (await loader(filteredProgress, signal)).filter((session) => !isObservationalMemoryWorkerSession(session));
+	};
+}
+
 /** Show TUI session selector and return selected session path or null if cancelled */
 export async function selectSession(
 	currentSessionsLoader: SessionsLoader,
@@ -45,7 +66,7 @@ export async function selectSession(
 				process.exit(0);
 			},
 			() => ui.requestRender(),
-			{ showRenameHint: false, keybindings },
+			{ showRenameHint: false, keybindings, initialNameFilter: "named" },
 		);
 
 		ui.addChild(selector);
