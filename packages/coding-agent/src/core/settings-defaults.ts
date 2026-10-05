@@ -53,6 +53,7 @@ export const SETTINGS_DEFAULTS = {
 	},
 	warnings: {
 		anthropicExtraUsage: true,
+		tmuxExtendedKeysFormat: true,
 	},
 	codemode: {
 		mode: "on",
