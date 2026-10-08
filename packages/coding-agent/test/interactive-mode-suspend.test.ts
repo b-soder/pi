@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { TuiAltScreen } from "../../tui/src/tui-alt-screen.ts";
+import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
 import { getInputToggleDefaultKeys, KeybindingsManager } from "../src/core/keybindings.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
@@ -28,6 +30,13 @@ type HandlePanelInputThis = {
 	cycleModel?: (direction: "forward" | "backward") => void;
 };
 
+type ToggleInputPanelThis = {
+	toolOutputEnabled: boolean;
+	renderer: TuiAltScreen;
+	inputPanelMode: "orig" | "nvim" | "both";
+	setInputPanelMode: (mode: "orig" | "nvim" | "both") => void;
+};
+
 type InteractiveModePrototypeWithHandleCtrlZ = {
 	handleCtrlZ(this: HandleCtrlZThis): void;
 };
@@ -51,6 +60,13 @@ function callHandlePanelInput(
 		): { consume?: true; data?: string } | undefined;
 	};
 	return prototype.handlePanelInput.call(context, data, ui);
+}
+
+function callToggleInputPanel(context: ToggleInputPanelThis): void {
+	const prototype = interactiveModePrototype as {
+		toggleInputPanel(this: ToggleInputPanelThis): void;
+	};
+	prototype.toggleInputPanel.call(context);
 }
 
 describe("InteractiveMode.handleCtrlZ", () => {
@@ -104,6 +120,26 @@ describe("InteractiveMode.handleCtrlZ", () => {
 		expect(keybindings.matches("\x1b/", "app.input.toggle")).toBe(true);
 		expect(callHandlePanelInput(context, "\x1b/", ui)).toEqual({ consume: true });
 		expect(toggleInputPanel).toHaveBeenCalledOnce();
+	});
+
+	test("Command-/ toggles only orig and nvim; both remains an explicit /input choice", () => {
+		const setInputPanelMode = vi.fn();
+		const context: ToggleInputPanelThis = {
+			toolOutputEnabled: true,
+			renderer: new TuiAltScreen(new VirtualTerminal(80, 24)),
+			inputPanelMode: "orig",
+			setInputPanelMode,
+		};
+
+		callToggleInputPanel(context);
+		expect(setInputPanelMode).toHaveBeenLastCalledWith("nvim");
+		context.inputPanelMode = "nvim";
+		callToggleInputPanel(context);
+		expect(setInputPanelMode).toHaveBeenLastCalledWith("orig");
+		context.inputPanelMode = "both";
+		callToggleInputPanel(context);
+		expect(setInputPanelMode).toHaveBeenLastCalledWith("nvim");
+		expect(setInputPanelMode).not.toHaveBeenCalledWith("both");
 	});
 
 	test("consumes Command-/ without switching panels while an overlay is open", () => {

@@ -3351,7 +3351,7 @@ export class InteractiveMode {
 
 	private toggleInputPanel(): void {
 		if (!this.toolOutputEnabled || !TuiLayouts.isViewportTUI(this.renderer) || this.renderer.hasOverlay()) return;
-		this.setInputPanelMode(this.inputPanelMode === "nvim" ? "both" : "nvim");
+		this.setInputPanelMode(this.inputPanelMode === "nvim" ? "orig" : "nvim");
 	}
 
 	private setInputPanelMode(mode: InputPanelMode): void {

@@ -47,6 +47,8 @@ interface RpcMessage {
 const decoder = new Decoder();
 const DEFAULT_CELL: GridCell = { text: " ", highlight: 0 };
 const RESET = "\x1b[0m";
+const BRACKETED_PASTE_START = "\x1b[200~";
+const BRACKETED_PASTE_END = "\x1b[201~";
 
 function valueLength(bytes: Uint8Array, offset: number): number | undefined {
 	if (offset >= bytes.length) return undefined;
@@ -209,6 +211,7 @@ export class NeovimViewport implements Component, Focusable {
 	private readonly initialMode: "i" | "n";
 	private child: ChildProcessWithoutNullStreams | undefined;
 	private inputBuffer: Uint8Array<ArrayBufferLike> = new Uint8Array();
+	private pasteBuffer: string | undefined;
 	private readonly grids = new Map<number, GridCell[][]>();
 	private readonly highlights = new Map<number, Highlight>();
 	private cursor = { grid: 1, row: 0, col: 0, visible: true };
@@ -327,6 +330,19 @@ export class NeovimViewport implements Component, Focusable {
 
 	handleInput(data: string): void {
 		if (!this.child || !this.attached || this.disposed) return;
+		if (this.pasteBuffer !== undefined) {
+			this.pasteBuffer += data;
+			this.flushBracketedPaste();
+			return;
+		}
+		const pasteStart = data.indexOf(BRACKETED_PASTE_START);
+		if (pasteStart !== -1) {
+			const beforePaste = data.slice(0, pasteStart);
+			if (beforePaste) this.handleInput(beforePaste);
+			this.pasteBuffer = data.slice(pasteStart + BRACKETED_PASTE_START.length);
+			this.flushBracketedPaste();
+			return;
+		}
 		this.request("nvim_input", [toNeovimKey(data)]).catch((error: unknown) => this.fail(error));
 	}
 
@@ -628,6 +644,17 @@ export class NeovimViewport implements Component, Focusable {
 					? { ...source[sourceRow]![sourceCol]! }
 					: { ...DEFAULT_CELL };
 			}
+	}
+
+	private flushBracketedPaste(): void {
+		if (this.pasteBuffer === undefined) return;
+		const end = this.pasteBuffer.indexOf(BRACKETED_PASTE_END);
+		if (end === -1) return;
+		const text = this.pasteBuffer.slice(0, end);
+		const remaining = this.pasteBuffer.slice(end + BRACKETED_PASTE_END.length);
+		this.pasteBuffer = undefined;
+		this.request("nvim_paste", [text, text.includes("\r\n"), -1]).catch((error: unknown) => this.fail(error));
+		if (remaining) this.handleInput(remaining);
 	}
 
 	private request(method: string, args: unknown[]): Promise<unknown> {
