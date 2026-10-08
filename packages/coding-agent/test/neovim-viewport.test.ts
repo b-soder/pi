@@ -74,6 +74,32 @@ describe("Neovim viewport", () => {
 		}
 	});
 
+	test.skipIf(!hasNeovim)("pastes bracketed text intact in insert and append modes", async () => {
+		const tui = new TuiMainScreen(new VirtualTerminal(80, 12));
+		const url = "https://iterm2.com/documentation-csiu.html";
+		const viewport = new NeovimViewport(tui, { onSubmit: () => {}, onQuit: () => {}, initialMode: "i" }, [
+			"--embed",
+			"-u",
+			"NONE",
+		]);
+		try {
+			await viewport.ready;
+			viewport.handleInput(`\x1b[200~${url}`);
+			viewport.handleInput("\x1b[201~");
+			await viWaitFor(async () => expect(await viewport.getBufferLines()).toEqual([url]));
+
+			await viewport.replaceBuffer("1234567890");
+			viewport.handleInput("\x1b");
+			await viWaitFor(async () => expect(await viewport.getMode()).toBe("n"));
+			viewport.handleInput("A");
+			await viWaitFor(async () => expect(await viewport.getMode()).toBe("i"));
+			viewport.handleInput(`\x1b[200~${url}\x1b[201~`);
+			await viWaitFor(async () => expect(await viewport.getBufferLines()).toEqual([`1234567890${url}`]));
+		} finally {
+			viewport.dispose();
+		}
+	});
+
 	test.skipIf(!hasNeovim)("restores an existing multiline draft and normal Neovim mode", async () => {
 		const tui = new TuiMainScreen(new VirtualTerminal(40, 12));
 		const viewport = new NeovimViewport(
