@@ -137,6 +137,13 @@ import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { loadAllHighlightLanguages } from "../../utils/syntax-highlight.ts";
 import { ensureTool, type ToolStatus } from "../../utils/tools-manager.ts";
 import { checkForNewPiVersion, type LatestPiRelease } from "../../utils/version-check.ts";
+import {
+	BORDER_BRIGHTNESS_ENV,
+	BORDER_COLOR_ENV,
+	readBorderBrightness,
+	readBorderColor,
+	scaleBorderBrightness,
+} from "./border-color.ts";
 import { reportBug } from "./bug-report.ts";
 import { createChatViewport, type InputPanelMode } from "./chat-viewport.ts";
 import { ArminComponent } from "./components/armin.ts";
@@ -469,7 +476,8 @@ export class InteractiveMode {
 	private suppressEditorBorders = false;
 	private transcriptScrollView: TuiLayouts.ScrollView | undefined;
 	private fullscreenLayoutRoot: Component | undefined;
-	private viewportBorderColor: string | undefined;
+	private viewportBorderColor: string | undefined = readBorderColor(process.env[BORDER_COLOR_ENV]);
+	private viewportBorderBrightness = readBorderBrightness(process.env[BORDER_BRIGHTNESS_ENV]);
 	private inputPanelMode: InputPanelMode = "orig";
 	private inputSessionDraft = "";
 	private nvimInputMode: NeovimInputMode = "i";
@@ -948,10 +956,7 @@ export class InteractiveMode {
 		this.options.tuiMode = mode;
 		this.bindInputPanelKeyListener(nextUi);
 		this.mountInteractiveTui(nextUi, components);
-		if (nextUi instanceof TuiAltScreen && this.viewportBorderColor) {
-			const ansi = foregroundAnsi(parseColor(this.viewportBorderColor), getTerminalColorMode());
-			nextUi.setViewportBorderStyle((value) => `${ansi}${value}\x1b[39m`);
-		}
+		if (nextUi instanceof TuiAltScreen) this.applyViewportBorderStyle(nextUi);
 		nextUi.invalidate();
 		nextUi.setFocus(focus);
 		if (!startRenderer) return true;
@@ -1033,14 +1038,7 @@ export class InteractiveMode {
 		});
 		this.transcriptScrollView = viewport.transcript;
 		this.fullscreenLayoutRoot = viewport.root;
-		if (this.renderer instanceof TuiAltScreen) {
-			const ansi = this.viewportBorderColor
-				? foregroundAnsi(parseColor(this.viewportBorderColor), getTerminalColorMode())
-				: undefined;
-			this.renderer.setViewportBorderStyle((value) =>
-				ansi ? `${ansi}${value}\x1b[39m` : theme.fg("border", value),
-			);
-		}
+		if (this.renderer instanceof TuiAltScreen) this.applyViewportBorderStyle(this.renderer);
 		this.bindInputPanelKeyListener(this.renderer);
 		this.mountInteractiveTui(this.renderer, [
 			this.documentContainer,
@@ -3482,6 +3480,21 @@ export class InteractiveMode {
 		else console.warn(`Could not ${action} the session input draft: ${message}`);
 	}
 
+	private applyViewportBorderStyle(renderer: TuiAltScreen): void {
+		renderer.setViewportBorderStyle((value) => {
+			if (!this.viewportBorderColor && this.viewportBorderBrightness === 1) {
+				return theme.fg("border", value);
+			}
+
+			const baseColor = this.viewportBorderColor ? parseColor(this.viewportBorderColor) : theme.colors.border;
+			const ansi = foregroundAnsi(
+				scaleBorderBrightness(baseColor, this.viewportBorderBrightness),
+				getTerminalColorMode(),
+			);
+			return `${ansi}${value}\x1b[39m`;
+		});
+	}
+
 	private handleBorderCommand(text: string): void {
 		const argument = text.slice("/border".length).trim();
 		if (!argument) {
@@ -3490,9 +3503,8 @@ export class InteractiveMode {
 		}
 		if (argument === "default") {
 			this.viewportBorderColor = undefined;
-			if (this.renderer instanceof TuiAltScreen) {
-				this.renderer.setViewportBorderStyle((value) => theme.fg("border", value));
-			}
+			delete process.env[BORDER_COLOR_ENV];
+			if (this.renderer instanceof TuiAltScreen) this.applyViewportBorderStyle(this.renderer);
 			return;
 		}
 		if (!/^#[\da-f]{6}$/i.test(argument)) {
@@ -3500,10 +3512,8 @@ export class InteractiveMode {
 			return;
 		}
 		this.viewportBorderColor = argument.toUpperCase();
-		const ansi = foregroundAnsi(parseColor(this.viewportBorderColor), getTerminalColorMode());
-		if (this.renderer instanceof TuiAltScreen) {
-			this.renderer.setViewportBorderStyle((value) => `${ansi}${value}\x1b[39m`);
-		}
+		process.env[BORDER_COLOR_ENV] = this.viewportBorderColor;
+		if (this.renderer instanceof TuiAltScreen) this.applyViewportBorderStyle(this.renderer);
 	}
 
 	private handleStartupSubmit(text: string): void {
@@ -5468,7 +5478,11 @@ export class InteractiveMode {
 					onOutputPadChange: (padding) => {
 						this.settingsManager.setOutputPad(padding);
 						this.outputPad = padding;
-						for (const container of [this.chatContainer, this.pendingMessagesContainer, this.toolOutputContainer]) {
+						for (const container of [
+							this.chatContainer,
+							this.pendingMessagesContainer,
+							this.toolOutputContainer,
+						]) {
 							for (const child of container.children) {
 								if ("setOutputPad" in child && typeof child.setOutputPad === "function") {
 									child.setOutputPad(padding);
