@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { describe, expect, test } from "vitest";
-import { CURSOR_MARKER } from "../../tui/src/tui.ts";
+import { describe, expect, test, vi } from "vitest";
+import { CURSOR_MARKER, type TuiMouseEvent } from "../../tui/src/tui.ts";
 import { TuiMainScreen } from "../../tui/src/tui-main-screen.ts";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
 import { NeovimViewport } from "../src/modes/interactive/components/neovim-viewport.ts";
@@ -35,8 +35,6 @@ describe("Neovim viewport", () => {
 				"-u",
 				"NONE",
 				"--cmd",
-				"lua vim.keymap.set('n', '<Esc>', function() local channel = vim.g.pi_channel; if type(channel) == 'number' then vim.rpcnotify(channel, 'pi_interrupt') end; return '<Esc>' end, { expr = true, noremap = true, silent = true })",
-				"--cmd",
 				"command! PiFlushTest lua local lines = {'live nvim edit'}; vim.api.nvim_buf_set_lines(0, 0, -1, true, lines); vim.rpcnotify(vim.g.pi_channel, 'pi_draft', lines, 'n'); vim.rpcnotify(vim.g.pi_channel, 'pi_submit', lines); vim.api.nvim_buf_set_lines(0, 0, -1, true, {''})",
 				"--cmd",
 				"command! PiQuitTest lua vim.rpcnotify(vim.g.pi_channel, 'pi_quit')",
@@ -45,20 +43,22 @@ describe("Neovim viewport", () => {
 		viewport.setViewportSize(40, 8);
 		try {
 			await viewport.ready;
-			expect(await viewport.getMode()).toBe("i");
+			expect(await viewport.getMode()).toBe("n");
 			viewport.focused = true;
 			await viewport.replaceBuffer("viewport smoke test");
 			await new Promise((resolve) => setTimeout(resolve, 25));
 			expect(viewport.render(40).join("\n")).toContain("viewport smoke test");
 			expect(viewport.render(40)[0]).toContain(CURSOR_MARKER);
-			expect(tui.getCursorStyleSequence()).toBe("\x1b[6 q");
+			expect(tui.getCursorStyleSequence()).toBe("\x1b[2 q");
+			viewport.handleInput("\x1b");
+			await viWaitFor(async () => expect(await viewport.getMode()).toBe("n"));
+			expect(interrupted).toBe(false);
+			viewport.handleInput("i");
+			await viWaitFor(async () => expect(await viewport.getMode()).toBe("i"));
 			viewport.handleInput("\x1b");
 			await viWaitFor(async () => expect(await viewport.getMode()).toBe("n"));
 			expect(interrupted).toBe(false);
 			viewport.setViewportSize(48, 14);
-			viewport.handleInput("\x1b");
-			await viWaitFor(() => expect(interrupted).toBe(true));
-			expect(await viewport.getMode()).toBe("n");
 			viewport.handleInput(":PiFlushTest\r");
 			viewport.handleInput("i");
 			await viWaitFor(() => expect(submitted).toBe("live nvim edit"));
@@ -69,6 +69,39 @@ describe("Neovim viewport", () => {
 			viewport.handleInput(":PiQuitTest\r");
 			viewport.handleInput("i");
 			await viWaitFor(() => expect(quit).toBe(true));
+		} finally {
+			viewport.dispose();
+		}
+	});
+
+	test.skipIf(!hasNeovim)("leaves mouse events to the fullscreen TUI instead of forwarding them to Neovim", async () => {
+		const tui = new TuiMainScreen(new VirtualTerminal(40, 12));
+		const viewport = new NeovimViewport(tui, { onSubmit: () => {}, onQuit: () => {} }, ["--embed", "-u", "NONE"]);
+		try {
+			await viewport.ready;
+			const request = vi.spyOn(viewport as any, "request");
+			const base = {
+				x: 2,
+				y: 2,
+				screenX: 2,
+				screenY: 2,
+				width: 40,
+				height: 8,
+				shift: false,
+				alt: false,
+				ctrl: false,
+			};
+			const events: TuiMouseEvent[] = [
+				{ ...base, type: "press", button: "left" },
+				{ ...base, type: "drag", button: "left" },
+				{ ...base, type: "release", button: "left" },
+				{ ...base, type: "click", button: "left", clickCount: 1 },
+				{ ...base, type: "wheel", button: "none", wheelDelta: -1 },
+				{ ...base, type: "move", button: "none" },
+			];
+
+			for (const event of events) expect(viewport.handleMouse(event)).toBeUndefined();
+			expect(request.mock.calls.filter(([method]) => method === "nvim_input_mouse")).toEqual([]);
 		} finally {
 			viewport.dispose();
 		}
