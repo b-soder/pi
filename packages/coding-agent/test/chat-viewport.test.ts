@@ -77,6 +77,30 @@ describe("chat viewport", () => {
 		expect(viewport.transcript.children[0]).toHaveProperty("children");
 	});
 
+	test("shows queued steering messages in the transcript when the original input is hidden", () => {
+		const pendingMessages = new Container();
+		pendingMessages.addChild(new Text("Steering: inspect this result", 1, 0));
+		const viewport = createChatViewport({
+			document: new Container(),
+			toolOutput: new Container(),
+			nvimViewport: new Text("NEOVIM PANEL", 0, 0),
+			fourPanel: true,
+			getInputMode: () => "nvim",
+			pendingMessages,
+			status: new Container(),
+			editor: new Text("ORIGINAL INPUT", 0, 0),
+			footer: new Container(),
+			getTerminalRows: () => 40,
+			getTerminalColumns: () => 80,
+		});
+		const frame = renderLayoutFrame(viewport.root, 80, 40, () => {});
+		const rendered = frame.lines.join("\n");
+
+		expect(rendered).toContain("Steering: inspect this result");
+		expect(rendered).toContain("NEOVIM PANEL");
+		expect(rendered).not.toContain("ORIGINAL INPUT");
+	});
+
 	test("builds five panels with the Neovim viewport between transcript and input", () => {
 		const toolOutput = new Container();
 		const nvimViewport = new Container();
@@ -252,7 +276,7 @@ describe("chat viewport", () => {
 		expect(newlineFrame.root.children[6]!.rect.height).toBe(emptyHeight + 1);
 		expect(newlineFrame.lines.join("\n")).toContain("111");
 		expect(editor.render(80)).toHaveLength(2);
-		expect(newlineFrame.root.children[6]!.children[1]!.rect.height).toBe(2);
+		expect(newlineFrame.root.children[6]!.children[0]!.rect.height).toBe(2);
 		terminalRows.value = 40;
 		const expandedFrame = renderLayoutFrame(viewport.root, 80, terminalRows.value, () => {});
 		expect(expandedFrame.root.children[6]!.rect.height).toBe(2);
