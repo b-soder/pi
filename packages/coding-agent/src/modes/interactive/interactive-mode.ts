@@ -480,7 +480,7 @@ export class InteractiveMode {
 	private viewportBorderBrightness = readBorderBrightness(process.env[BORDER_BRIGHTNESS_ENV]);
 	private inputPanelMode: InputPanelMode = "orig";
 	private inputSessionDraft = "";
-	private nvimInputMode: NeovimInputMode = "i";
+	private nvimInputMode: NeovimInputMode = "n";
 	private restoringInputState = false;
 	private inputStateSaveTimer: NodeJS.Timeout | undefined;
 	private inputStateSaveWarningShown = false;
@@ -3378,7 +3378,7 @@ export class InteractiveMode {
 		try {
 			this.inputPanelMode = state?.inputPanelMode ?? "orig";
 			this.inputSessionDraft = state?.draft ?? "";
-			this.nvimInputMode = state?.nvimMode ?? "i";
+			this.nvimInputMode = state?.nvimMode ?? "n";
 			this.editor.setText(this.inputSessionDraft);
 			if (this.nvimViewportContainer) {
 				void this.nvimViewportContainer
@@ -3454,7 +3454,7 @@ export class InteractiveMode {
 		this.inputSessionDraft = draft;
 		const hasSessionFile = fs.existsSync(sessionFile);
 		const hasInputState = fs.existsSync(statePath);
-		if (!hasSessionFile && !hasInputState && !draft && this.inputPanelMode === "orig" && this.nvimInputMode === "i") {
+		if (!hasSessionFile && !hasInputState && !draft && this.inputPanelMode === "orig" && this.nvimInputMode === "n") {
 			return;
 		}
 		try {

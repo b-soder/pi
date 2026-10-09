@@ -7,7 +7,6 @@ import {
 	sliceByColumn,
 	type TUI,
 	type TuiMouseEvent,
-	type TuiMouseEventResult,
 } from "@earendil-works/pi-tui";
 import { Decoder, encode } from "@msgpack/msgpack";
 
@@ -258,7 +257,7 @@ export class NeovimViewport implements Component, Focusable {
 		this.onDraftChange = handlers.onDraftChange ?? (() => {});
 		this.onModeChange = handlers.onModeChange ?? (() => {});
 		this.initialText = handlers.initialText ?? "";
-		this.initialMode = handlers.initialMode ?? "i";
+		this.initialMode = handlers.initialMode ?? "n";
 		this.text = this.initialText;
 		this.currentMode = this.initialMode;
 		this.initialHardwareCursor = tui.getShowHardwareCursor();
@@ -346,30 +345,8 @@ export class NeovimViewport implements Component, Focusable {
 		this.request("nvim_input", [toNeovimKey(data)]).catch((error: unknown) => this.fail(error));
 	}
 
-	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
-		if (event.type === "move") return undefined;
-		const button =
-			event.button === "left"
-				? "left"
-				: event.button === "right"
-					? "right"
-					: event.button === "middle"
-						? "middle"
-						: "wheel";
-		const action = event.type === "wheel" ? (event.wheelDelta && event.wheelDelta < 0 ? "up" : "down") : event.type;
-		if (action === "click") return { handled: true, focus: true };
-		if (action === "press" || action === "release" || action === "drag" || action === "up" || action === "down") {
-			if (this.attached)
-				this.request("nvim_input_mouse", [
-					button,
-					action,
-					`${event.shift ? "S" : ""}${event.alt ? "A" : ""}${event.ctrl ? "C" : ""}`,
-					0,
-					event.y,
-					event.x,
-				]).catch((error: unknown) => this.fail(error));
-			return { handled: true, focus: true };
-		}
+	handleMouse(_event: TuiMouseEvent): undefined {
+		// Let the outer fullscreen TUI handle selection; Neovim mouse input moves its cursor.
 		return undefined;
 	}
 
