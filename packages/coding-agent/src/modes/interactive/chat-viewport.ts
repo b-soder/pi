@@ -307,8 +307,9 @@ class ResizablePanelStack extends VStack {
 
 /** Shared fullscreen transcript and fixed input-dock layout. */
 export function createChatViewport(options: ChatViewportOptions): ChatViewport {
-	const transcriptContent =
-		options.fourPanel && options.activity ? new VStack([options.document, options.activity]) : options.document;
+	const transcriptContent = options.fourPanel
+		? new VStack([options.document, ...(options.activity ? [options.activity] : []), options.pendingMessages])
+		: options.document;
 	const transcript = new ScrollView(transcriptContent, {
 		follow: "end",
 		primary: true,
@@ -325,10 +326,7 @@ export function createChatViewport(options: ChatViewportOptions): ChatViewport {
 			scrollbarTrackStyle: options.scrollbarTrackStyle,
 			scrollbarThumbStyle: options.scrollbarThumbStyle,
 		});
-		const input = new VStack([
-			{ component: options.pendingMessages, shrink: 1, minSize: 0 },
-			{ component: options.editor, shrink: 1, minSize: 1 },
-		]);
+		const input = new VStack([{ component: options.editor, shrink: 1, minSize: 1 }]);
 		const footer = new VStack([{ component: options.footer, shrink: 1, minSize: 0 }]);
 		const width = options.getTerminalColumns?.() ?? 80;
 		const naturalInputHeight = input.render(width).length;
