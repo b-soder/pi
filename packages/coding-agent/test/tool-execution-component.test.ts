@@ -10,6 +10,7 @@ import { createReadTool, createReadToolDefinition } from "../src/core/tools/read
 import { withBuiltInRenderers } from "../src/core/tools/renderers/index.ts";
 import { createWriteToolDefinition } from "../src/core/tools/write.ts";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.ts";
+import { VisualLinePreview } from "../src/modes/interactive/components/visual-truncate.ts";
 import { initTheme, theme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
 
@@ -43,6 +44,48 @@ describe("ToolExecutionComponent parity", () => {
 	afterEach(() => {
 		resetCapabilitiesCache();
 		vi.useRealTimers();
+	});
+
+	test("exposes the real bash output's wrap boundaries through its renderer shell", () => {
+		const component = new ToolExecutionComponent(
+			"bash",
+			"wrapped-output",
+			{ command: "printf" },
+			{},
+			createBashToolDefinition(process.cwd(), { exposeSessionEnvironment: false }),
+			createFakeTui(),
+			process.cwd(),
+		);
+		component.updateResult({ content: [{ type: "text", text: "abcdefghijklmnopqrstuvwx\nnext" }], isError: false });
+		for (const expanded of [false, true]) {
+			component.setExpanded(expanded);
+			const rendered = component.render(22);
+			const firstRow = rendered.findIndex((line) => stripAnsi(line).includes("abcdefghijklmnopqrst"));
+			expect(firstRow).toBeGreaterThanOrEqual(0);
+			expect(component.getSelectionJoinerAfterRow(firstRow, 22)).toBe("");
+			expect(component.getSelectionJoinerAfterRow(firstRow + 1, 22)).toBeUndefined();
+		}
+	});
+
+	test("keeps soft-wrap boundaries in collapsed tool output without joining the hidden-line hint", () => {
+		const preview = new VisualLinePreview({
+			text: "abcdefghijklmnopqrstuvwx\nnext",
+			maxVisualLines: 2,
+			keep: "end",
+			formatHint: () => "... earlier lines",
+		});
+		const lines = preview.render(20);
+		expect(lines).toHaveLength(3);
+		expect(preview.getSelectionJoinerAfterRow(0, 20)).toBeUndefined();
+		expect(preview.getSelectionJoinerAfterRow(1, 20)).toBeUndefined();
+		const expanded = new VisualLinePreview({
+			text: "abcdefghijklmnopqrstuvwx\nnext",
+			maxVisualLines: 3,
+			keep: "end",
+			formatHint: () => "... earlier lines",
+		});
+		expect(expanded.getSelectionJoinerAfterRow(0, 20)).toBe("");
+		expect(expanded.getSelectionJoinerAfterRow(1, 20)).toBeUndefined();
 	});
 
 	// Issue #10292: the component loads the PNG transcoder itself, so this works in any TUI host.

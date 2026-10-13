@@ -7,6 +7,7 @@ import {
 	sliceByColumn,
 	type TUI,
 	type TuiMouseEvent,
+	visibleWidth,
 } from "@earendil-works/pi-tui";
 import { Decoder, encode } from "@msgpack/msgpack";
 
@@ -198,6 +199,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }
 
+export interface BufferCursorPosition {
+	line: number;
+	col: number;
+}
+
+function byteColumnToStringColumn(line: string, byteColumn: number): number {
+	let bytes = 0;
+	let column = 0;
+	for (const character of line) {
+		const characterBytes = Buffer.byteLength(character, "utf8");
+		if (bytes + characterBytes > byteColumn) break;
+		bytes += characterBytes;
+		column += character.length;
+	}
+	return column;
+}
+
 /** Embedded Neovim linegrid component. */
 export class NeovimViewport implements Component, Focusable {
 	private readonly tui: TUI;
@@ -206,17 +224,27 @@ export class NeovimViewport implements Component, Focusable {
 	private readonly onInterrupt: () => void;
 	private readonly onDraftChange: (text: string, mode: "i" | "n") => void;
 	private readonly onModeChange: (mode: "i" | "n") => void;
+	private readonly onCursorChange: (cursor: BufferCursorPosition) => void;
 	private readonly initialText: string;
 	private readonly initialMode: "i" | "n";
+	private bufferUpdate: Promise<void> = Promise.resolve();
+	private resizeUpdate: Promise<void> = Promise.resolve();
+	private resizePending = false;
+	private resizeGeneration = 0;
+	private resizeRpcDone = false;
+	private resizeFallbackTimer: NodeJS.Timeout | undefined;
+	private bufferCursor: BufferCursorPosition = { line: 0, col: 0 };
 	private child: ChildProcessWithoutNullStreams | undefined;
 	private inputBuffer: Uint8Array<ArrayBufferLike> = new Uint8Array();
 	private pasteBuffer: string | undefined;
 	private readonly grids = new Map<number, GridCell[][]>();
+	private readonly gridWraps = new Map<number, boolean[]>();
 	private readonly highlights = new Map<number, Highlight>();
 	private cursor = { grid: 1, row: 0, col: 0, visible: true };
 	private cursorMode: ModeInfo = { cursor_shape: "block", cell_percentage: 100 };
 	private readonly modeInfo = new Map<number, ModeInfo>();
 	private currentMode: "i" | "n" = "n";
+	private commandLineMode = false;
 	private initializing = true;
 	private width = 1;
 	private height = 1;
@@ -245,6 +273,7 @@ export class NeovimViewport implements Component, Focusable {
 			onInterrupt?: () => void;
 			onDraftChange?: (text: string, mode: "i" | "n") => void;
 			onModeChange?: (mode: "i" | "n") => void;
+			onCursorChange?: (cursor: BufferCursorPosition) => void;
 			initialText?: string;
 			initialMode?: "i" | "n";
 		},
@@ -256,6 +285,7 @@ export class NeovimViewport implements Component, Focusable {
 		this.onInterrupt = handlers.onInterrupt ?? (() => {});
 		this.onDraftChange = handlers.onDraftChange ?? (() => {});
 		this.onModeChange = handlers.onModeChange ?? (() => {});
+		this.onCursorChange = handlers.onCursorChange ?? (() => {});
 		this.initialText = handlers.initialText ?? "";
 		this.initialMode = handlers.initialMode ?? "n";
 		this.text = this.initialText;
@@ -279,12 +309,59 @@ export class NeovimViewport implements Component, Focusable {
 		if (nextWidth === this.width && nextHeight === this.height) return;
 		this.width = nextWidth;
 		this.height = nextHeight;
-		if (this.child && this.attached)
-			this.request("nvim_ui_try_resize", [nextWidth, nextHeight]).catch((error: unknown) => this.fail(error));
+		// Neovim keeps its command row below the buffer; Pi draws that row in
+		// the divider. Resize only after mirrored text arrives, then reveal the
+		// logical cursor: expanding a scrolled one-line window otherwise leaves
+		// the last pasted line stranded at screen row zero.
+		if (this.child && this.attached) {
+			this.resizePending = true;
+			this.resizeRpcDone = false;
+			if (this.resizeFallbackTimer) clearTimeout(this.resizeFallbackTimer);
+			const generation = ++this.resizeGeneration;
+			this.resizeUpdate = this.resizeUpdate.then(async () => {
+				await this.bufferUpdate;
+				await this.request("nvim_ui_try_resize", [this.width, this.height + 1]);
+				await this.request("nvim_exec_lua", [
+					"local view=vim.fn.winsaveview(); view.topline=math.max(1,view.lnum-vim.api.nvim_win_get_height(0)+1); vim.fn.winrestview(view)",
+					[],
+				]);
+			});
+			void this.resizeUpdate.then(
+				() => {
+					if (generation !== this.resizeGeneration || this.disposed) return;
+					this.resizeRpcDone = true;
+					this.finishResizeIfReady();
+					if (this.resizePending) {
+						// Never leave the draft in fallback rendering if a custom Neovim
+						// configuration reports an unexpected screen cursor position.
+						this.resizeFallbackTimer = setTimeout(() => {
+							if (generation !== this.resizeGeneration || this.disposed) return;
+							this.resizePending = false;
+							this.tui.requestRender();
+						}, 120);
+						this.resizeFallbackTimer.unref();
+					}
+				},
+				(error: unknown) => this.fail(error),
+			);
+		}
 	}
 
 	getText(): string {
 		return this.text;
+	}
+
+	getSelectionJoinerAfterRow(row: number, _width: number): string | undefined {
+		return this.gridWraps.get(1)?.[row] ? "" : undefined;
+	}
+
+	/** Visible buffer rows; the command row occupies the divider below the panel. */
+	getNaturalHeight(width: number, terminalRows: number): number {
+		const columns = Math.max(1, Math.floor(width));
+		const rows = this.text
+			.split("\n")
+			.reduce((count, line) => count + Math.max(1, Math.ceil((visibleWidth(line) + 1) / columns)), 0);
+		return Math.max(1, Math.min(rows, Math.max(5, Math.floor(terminalRows * 0.3)) - 1));
 	}
 
 	async getBufferLines(): Promise<string[]> {
@@ -303,15 +380,40 @@ export class NeovimViewport implements Component, Focusable {
 		return mode.mode;
 	}
 
+	async getCursorPosition(): Promise<BufferCursorPosition> {
+		await this.ready;
+		const cursor = await this.request("nvim_win_get_cursor", [0]);
+		if (!Array.isArray(cursor) || typeof cursor[0] !== "number" || typeof cursor[1] !== "number") {
+			throw new Error("Neovim returned an invalid cursor position");
+		}
+		const lines = await this.getBufferLines();
+		const line = Math.max(0, Math.min(lines.length - 1, cursor[0] - 1));
+		return { line, col: byteColumnToStringColumn(lines[line] ?? "", cursor[1]) };
+	}
+
+	async setCursorPosition(position: BufferCursorPosition): Promise<void> {
+		await this.ready;
+		await this.bufferUpdate;
+		const lines = this.text.split("\n");
+		const line = Math.max(0, Math.min(lines.length - 1, Math.floor(position.line)));
+		const text = lines[line] ?? "";
+		const column = Math.max(0, Math.min(text.length, Math.floor(position.col)));
+		const byteColumn = Buffer.byteLength(text.slice(0, column), "utf8");
+		await this.request("nvim_win_set_cursor", [0, [line + 1, byteColumn]]);
+	}
+
 	setText(text: string): void {
-		this.text = text;
 		void this.replaceBuffer(text).catch((error: unknown) => this.fail(error));
 	}
 
 	async replaceBuffer(text: string): Promise<void> {
 		this.text = text;
-		await this.ready;
-		await this.request("nvim_buf_set_lines", [0, 0, -1, true, text.split("\n")]);
+		const update = this.bufferUpdate.then(async () => {
+			await this.ready;
+			await this.request("nvim_buf_set_lines", [0, 0, -1, true, text.split("\n")]);
+		});
+		this.bufferUpdate = update;
+		await update;
 	}
 
 	async restoreState(text: string, mode: "i" | "n"): Promise<void> {
@@ -342,6 +444,13 @@ export class NeovimViewport implements Component, Focusable {
 			this.flushBracketedPaste();
 			return;
 		}
+		// The command row is redrawn before Neovim moves its grid cursor there.
+		// Predict the transition for the first command key so the old buffer
+		// cursor does not flash for one frame on `:` (or `/` and `?`).
+		if (this.currentMode === "n" && (data === ":" || data === "/" || data === "?")) {
+			this.commandLineMode = true;
+			this.tui.requestRender();
+		}
 		this.request("nvim_input", [toNeovimKey(data)]).catch((error: unknown) => this.fail(error));
 	}
 
@@ -353,29 +462,85 @@ export class NeovimViewport implements Component, Focusable {
 	render(width: number): string[] {
 		if (this.error) return [`\x1b[31mNeovim: ${this.error}\x1b[0m`];
 		if (!this.child) return ["Starting Neovim..."];
-		const grid = this.grids.get(this.cursor.grid) ?? this.grids.get(1);
+		const grid = this.grids.get(1);
 		if (!grid) return ["Waiting for Neovim UI..."];
+		if (this.resizePending || grid.length < this.height + 1) return this.renderResizingDraft(width);
 		const lines: string[] = [];
-		for (let row = 0; row < Math.min(this.height, grid.length); row++) {
-			let line = "";
-			const hasCursorOnRow =
-				this.currentFocused && this.cursor.visible && this.cursor.grid === 1 && row === this.cursor.row;
-			for (let col = 0; col < Math.min(width, grid[row]!.length); col++) {
-				const cell = grid[row]![col]!;
-				line += sgrFor(this.highlights.get(cell.highlight)) + cell.text + (cell.highlight ? RESET : "");
-			}
-			if (hasCursorOnRow) {
-				const cursorColumn = Math.max(0, Math.min(this.cursor.col, Math.min(width, grid[row]!.length)));
-				const cursorShape = this.cursorMode.cursor_shape;
-				this.tui.setCursorStyle(
-					cursorShape === "horizontal" ? "underline" : cursorShape === "vertical" ? "bar" : "block",
-				);
-				line = `${sliceByColumn(line, 0, cursorColumn, true)}${CURSOR_MARKER}${sliceByColumn(line, cursorColumn, width, true)}`;
-			}
-			lines.push(line);
-		}
+		for (let row = 0; row < Math.min(this.height, grid.length); row++)
+			lines.push(this.renderGridRow(grid, row, width));
 		while (lines.length < Math.min(this.height, grid.length)) lines.push("");
 		return lines;
+	}
+
+	/** Show the canonical draft until Neovim has redrawn its resized grid. */
+	private finishResizeIfReady(): void {
+		const expectedRow = Math.min(this.bufferCursor.line, this.height - 1);
+		if (!this.resizePending || !this.resizeRpcDone || this.grids.get(1)?.length !== this.height + 1) return;
+		if (this.cursor.row !== expectedRow && !this.commandLineMode) return;
+		this.resizePending = false;
+		if (this.resizeFallbackTimer) clearTimeout(this.resizeFallbackTimer);
+		this.resizeFallbackTimer = undefined;
+		this.tui.requestRender();
+	}
+
+	private renderResizingDraft(width: number): string[] {
+		const lines = this.text.split("\n");
+		const top = Math.max(0, Math.min(lines.length - this.height, this.bufferCursor.line - this.height + 1));
+		return Array.from({ length: this.height }, (_, row) => {
+			const lineIndex = top + row;
+			const line = lines[lineIndex] ?? "";
+			const content = sliceByColumn(line, 0, width, true);
+			if (!this.currentFocused || lineIndex !== this.bufferCursor.line) return content;
+			const column = Math.max(0, Math.min(this.bufferCursor.col, width));
+			return `${sliceByColumn(content, 0, column, true)}${CURSOR_MARKER}${sliceByColumn(content, column, width, true)}`;
+		});
+	}
+
+	/** The last Neovim UI row is drawn by the divider below this viewport. */
+	renderCommandRow(width: number): string | undefined {
+		const grid = this.grids.get(1);
+		if (!grid || !this.currentFocused) return undefined;
+		const cells = grid[this.height];
+		if (!cells) return undefined;
+		let lastContentColumn = 0;
+		for (let col = 0; col < Math.min(width, cells.length); col++) {
+			if (cells[col]!.text.trim()) lastContentColumn = col + 1;
+		}
+		const commandCursor = this.commandLineMode && this.cursor.row !== this.height ? lastContentColumn : undefined;
+		if (
+			this.cursor.visible &&
+			this.cursor.grid === 1 &&
+			(this.cursor.row === this.height || commandCursor !== undefined)
+		) {
+			lastContentColumn = Math.max(lastContentColumn, (commandCursor ?? this.cursor.col) + 1);
+		}
+		return lastContentColumn
+			? this.renderGridRow(grid, this.height, Math.min(width, lastContentColumn), commandCursor)
+			: undefined;
+	}
+
+	private renderGridRow(grid: GridCell[][], row: number, width: number, commandCursor?: number): string {
+		const cells = grid[row];
+		if (!cells) return "";
+		let line = "";
+		for (let col = 0; col < Math.min(width, cells.length); col++) {
+			const cell = cells[col]!;
+			line += sgrFor(this.highlights.get(cell.highlight)) + cell.text + (cell.highlight ? RESET : "");
+		}
+		if (
+			this.currentFocused &&
+			this.cursor.visible &&
+			this.cursor.grid === 1 &&
+			(commandCursor !== undefined || (row === this.cursor.row && (!this.commandLineMode || row === this.height)))
+		) {
+			const cursorColumn = Math.max(0, Math.min(commandCursor ?? this.cursor.col, Math.min(width, cells.length)));
+			const cursorShape = this.cursorMode.cursor_shape;
+			this.tui.setCursorStyle(
+				cursorShape === "horizontal" ? "underline" : cursorShape === "vertical" ? "bar" : "block",
+			);
+			line = `${sliceByColumn(line, 0, cursorColumn, true)}${CURSOR_MARKER}${sliceByColumn(line, cursorColumn, width, true)}`;
+		}
+		return line;
 	}
 
 	invalidate(): void {}
@@ -396,6 +561,7 @@ export class NeovimViewport implements Component, Focusable {
 
 	dispose(): void {
 		this.disposed = true;
+		if (this.resizeFallbackTimer) clearTimeout(this.resizeFallbackTimer);
 		this.tui.setShowHardwareCursor(this.initialHardwareCursor);
 		this.tui.setCursorStyle("block");
 		for (const pending of this.pendingRequests.values()) pending.reject(new Error("Neovim viewport disposed"));
@@ -431,10 +597,14 @@ export class NeovimViewport implements Component, Focusable {
 				this.channelId = result[0];
 				return this.request("nvim_set_var", ["pi_channel", result[0]]);
 			})
+			.then(() => this.request("nvim_set_option_value", ["laststatus", 0, { scope: "global" }]))
+			.then(() => this.request("nvim_set_option_value", ["cmdheight", 1, { scope: "global" }]))
+			// Keep insertion at EOL without a Normal-mode virtual column that leaves `x` past the new EOL.
+			.then(() => this.request("nvim_set_option_value", ["virtualedit", "insert", { scope: "global" }]))
 			.then(() =>
 				this.request("nvim_ui_attach", [
 					this.width,
-					this.height,
+					this.height + 1,
 					{ ext_linegrid: true, ext_hlstate: true, ext_multigrid: false },
 				]),
 			)
@@ -488,10 +658,13 @@ export class NeovimViewport implements Component, Focusable {
 		if (message.type !== 2 || message.method === undefined) return;
 		if (message.method === "redraw") {
 			for (const event of message.params ?? []) this.handleRedrawEvent(event);
+			this.finishResizeIfReady();
 		} else if (message.method === "pi_submit") {
 			this.handleSubmit(message.params?.[0]);
 		} else if (message.method === "pi_draft") {
 			this.handleDraft(message.params ?? []);
+		} else if (message.method === "pi_cursor") {
+			this.handleCursor(message.params?.[0], message.params?.[1]);
 		} else if (message.method === "pi_quit") {
 			this.onQuit();
 		} else if (message.method === "pi_interrupt") {
@@ -507,7 +680,10 @@ export class NeovimViewport implements Component, Focusable {
 			if (name === "grid_resize") this.resizeGrid(payload);
 			else if (name === "grid_clear" && typeof payload[0] === "number") {
 				const grid = this.grids.get(payload[0]);
-				if (grid) this.grids.set(payload[0], this.createGrid(grid[0]?.length ?? this.width, grid.length));
+				if (grid) {
+					this.grids.set(payload[0], this.createGrid(grid[0]?.length ?? this.width, grid.length));
+					this.gridWraps.set(payload[0], Array(grid.length).fill(false));
+				}
 			} else if (name === "grid_line") this.updateGridLine(payload);
 			else if (name === "grid_scroll") this.scrollGrid(payload);
 			else if (name === "grid_cursor_goto") {
@@ -515,8 +691,10 @@ export class NeovimViewport implements Component, Focusable {
 					this.cursor = { grid: payload[0]!, row: payload[1]!, col: payload[2]!, visible: true };
 			} else if (name === "hl_attr_define" && typeof payload[0] === "number" && isRecord(payload[1]))
 				this.highlights.set(payload[0], payload[1] as Highlight);
-			else if (name === "grid_destroy" && typeof payload[0] === "number") this.grids.delete(payload[0]);
-			else if (name === "mode_info_set") this.updateModeInfo(payload);
+			else if (name === "grid_destroy" && typeof payload[0] === "number") {
+				this.grids.delete(payload[0]);
+				this.gridWraps.delete(payload[0]);
+			} else if (name === "mode_info_set") this.updateModeInfo(payload);
 			else if (name === "mode_change") this.updateCurrentMode(payload);
 		}
 		this.tui.requestRender();
@@ -536,7 +714,8 @@ export class NeovimViewport implements Component, Focusable {
 
 	private updateCurrentMode(payload: unknown[]): void {
 		if (typeof payload[0] === "string") {
-			this.cursor.visible = payload[0] !== "cmdline_normal" && payload[0] !== "cmdline_hide";
+			this.commandLineMode = payload[0].startsWith("cmdline_") && payload[0] !== "cmdline_hide";
+			this.cursor.visible = payload[0] !== "cmdline_hide";
 			const mode = payload[0].startsWith("i") ? "i" : "n";
 			if (this.currentMode !== mode) {
 				this.currentMode = mode;
@@ -559,15 +738,42 @@ export class NeovimViewport implements Component, Focusable {
 				this.onModeChange(mode);
 			}
 		}
-		if (text === this.text) return;
-		this.text = text;
-		this.onDraftChange(text, this.currentMode);
+		if (text !== this.text && this.currentFocused) {
+			this.text = text;
+			this.onDraftChange(text, this.currentMode);
+		}
+		if (this.currentFocused) this.handleCursor(params[2], params[3], lines);
+	}
+
+	private handleCursor(cursor: unknown, screen: unknown, lines = this.text.split("\n")): void {
+		if (Array.isArray(cursor) && typeof cursor[0] === "number" && typeof cursor[1] === "number") {
+			const line = Math.max(0, Math.min(lines.length - 1, cursor[0] - 1));
+			this.bufferCursor = { line, col: byteColumnToStringColumn(lines[line] ?? "", cursor[1]) };
+			this.onCursorChange(this.bufferCursor);
+		}
+		if (
+			Array.isArray(screen) &&
+			typeof screen[0] === "number" &&
+			typeof screen[1] === "number" &&
+			screen[0] >= 0 &&
+			screen[1] >= 0
+		) {
+			this.cursor = {
+				...this.cursor,
+				grid: 1,
+				row: screen[0],
+				col: screen[1],
+			};
+			this.tui.requestRender();
+		}
+		this.finishResizeIfReady();
 	}
 
 	private resizeGrid(payload: unknown[]): void {
 		if (typeof payload[0] !== "number" || typeof payload[1] !== "number" || typeof payload[2] !== "number") return;
 		const [, width, height] = payload as [number, number, number];
 		this.grids.set(payload[0], this.createGrid(width, height));
+		this.gridWraps.set(payload[0], Array(height).fill(false));
 	}
 
 	private createGrid(width: number, height: number): GridCell[][] {
@@ -594,6 +800,7 @@ export class NeovimViewport implements Component, Focusable {
 			const repeat = typeof cellValue[2] === "number" ? cellValue[2] : 1;
 			for (let index = 0; index < repeat && col < line.length; index++, col++) line[col] = { text, highlight };
 		}
+		if (col >= line.length) this.gridWraps.get(payload[0])![payload[1]] = payload[4] === true;
 	}
 
 	flush(text: string): void {
@@ -613,6 +820,8 @@ export class NeovimViewport implements Component, Focusable {
 		const grid = this.grids.get(gridId!);
 		if (!grid) return;
 		const source = grid.map((line) => line.map((cell) => ({ ...cell })));
+		const wraps = this.gridWraps.get(gridId!);
+		const sourceWraps = wraps?.slice();
 		for (let row = top!; row < bottom!; row++)
 			for (let col = left!; col < right!; col++) {
 				const sourceRow = row + rows!;
@@ -621,16 +830,22 @@ export class NeovimViewport implements Component, Focusable {
 					? { ...source[sourceRow]![sourceCol]! }
 					: { ...DEFAULT_CELL };
 			}
+		if (wraps && left === 0 && right === grid[0]?.length) {
+			for (let row = top!; row < bottom!; row++) wraps[row] = sourceWraps?.[row + rows!] ?? false;
+		}
 	}
 
 	private flushBracketedPaste(): void {
 		if (this.pasteBuffer === undefined) return;
 		const end = this.pasteBuffer.indexOf(BRACKETED_PASTE_END);
 		if (end === -1) return;
-		const text = this.pasteBuffer.slice(0, end);
+		// Match Pi's original editor: macOS terminals can send CR-only pastes.
+		// Leaving ^M in Neovim lets the original editor normalize and mirror the
+		// text back later, resetting Neovim's cursor to the first pasted line.
+		const text = this.pasteBuffer.slice(0, end).replace(/\r\n?/g, "\n");
 		const remaining = this.pasteBuffer.slice(end + BRACKETED_PASTE_END.length);
 		this.pasteBuffer = undefined;
-		this.request("nvim_paste", [text, text.includes("\r\n"), -1]).catch((error: unknown) => this.fail(error));
+		this.request("nvim_paste", [text, false, -1]).catch((error: unknown) => this.fail(error));
 		if (remaining) this.handleInput(remaining);
 	}
 

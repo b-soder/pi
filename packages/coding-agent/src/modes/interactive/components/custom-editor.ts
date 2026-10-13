@@ -1,4 +1,12 @@
-import { Editor, type EditorOptions, type EditorTheme, type TUI, visibleWidth } from "@earendil-works/pi-tui";
+import {
+	Editor,
+	type EditorOptions,
+	type EditorTheme,
+	type TUI,
+	type TuiMouseEvent,
+	type TuiMouseEventResult,
+	visibleWidth,
+} from "@earendil-works/pi-tui";
 import type { AppKeybinding, KeybindingsManager } from "../../../core/keybindings.ts";
 import type { StatusIndicator } from "./status-indicator.ts";
 
@@ -20,6 +28,7 @@ export class CustomEditor extends Editor {
 	public onEscape?: () => void;
 	public onCtrlD?: () => void;
 	public onPasteImage?: () => void;
+	public onCursorChange?: (cursor: { line: number; col: number }) => void;
 	/** Handler for extension-registered shortcuts. Returns true if handled. */
 	public onExtensionShortcut?: (data: string) => boolean;
 
@@ -86,6 +95,20 @@ export class CustomEditor extends Editor {
 	}
 
 	handleInput(data: string): void {
+		try {
+			this.handleInputInternal(data);
+		} finally {
+			this.onCursorChange?.(this.getCursor());
+		}
+	}
+
+	override handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+		const result = super.handleMouse(event);
+		if (event.type === "click" && result?.focus) this.onCursorChange?.(this.getCursor());
+		return result;
+	}
+
+	private handleInputInternal(data: string): void {
 		// Check extension-registered shortcuts first
 		if (this.onExtensionShortcut?.(data)) {
 			return;

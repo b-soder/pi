@@ -122,6 +122,11 @@ export interface Component {
 	 */
 	render(width: number): string[];
 
+	/** Separator before the next visual row when both rows belong to one logical line. */
+	getSelectionJoinerAfterRow?(row: number, width: number): string | undefined;
+	/** Visual left padding to remove from a continued row (not source indentation). */
+	getSelectionContinuationIndent?(row: number, width: number): number;
+
 	/** Optional handler for keyboard input when component has focus. */
 	handleInput?(data: string): void;
 
@@ -400,6 +405,30 @@ export class Container implements Component {
 			childY += childHeight;
 		}
 		return undefined;
+	}
+
+	getSelectionJoinerAfterRow(row: number, width: number): string | undefined {
+		let offset = 0;
+		for (const child of this.children) {
+			const height = child.render(width).length;
+			if (row >= offset && row < offset + height) {
+				return row + 1 < offset + height ? child.getSelectionJoinerAfterRow?.(row - offset, width) : undefined;
+			}
+			offset += height;
+		}
+		return undefined;
+	}
+
+	getSelectionContinuationIndent(row: number, width: number): number {
+		let offset = 0;
+		for (const child of this.children) {
+			const height = child.render(width).length;
+			if (row >= offset && row < offset + height) {
+				return child.getSelectionContinuationIndent?.(row - offset, width) ?? 0;
+			}
+			offset += height;
+		}
+		return 0;
 	}
 
 	render(width: number): string[] {

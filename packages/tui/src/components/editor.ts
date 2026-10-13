@@ -1119,6 +1119,13 @@ export class Editor implements Component, Focusable {
 		return { line: this.state.cursorLine, col: this.state.cursorCol };
 	}
 
+	setCursor(line: number, col: number): void {
+		const targetLine = Math.max(0, Math.min(this.state.lines.length - 1, Math.floor(line)));
+		this.state.cursorLine = targetLine;
+		this.setCursorCol(Math.max(0, Math.min(this.state.lines[targetLine]!.length, Math.floor(col))));
+		this.invalidate();
+	}
+
 	setText(text: string): void {
 		this.cancelAutocomplete();
 		this.lastAction = null;

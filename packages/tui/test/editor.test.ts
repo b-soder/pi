@@ -43,6 +43,19 @@ async function flushAutocomplete(): Promise<void> {
 }
 
 describe("Editor component", () => {
+	describe("Cursor position", () => {
+		it("sets and clamps the cursor to valid logical text coordinates", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.setText("first\nsecond");
+
+			editor.setCursor(0, 2);
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 2 });
+
+			editor.setCursor(20, 20);
+			assert.deepStrictEqual(editor.getCursor(), { line: 1, col: 6 });
+		});
+	});
+
 	describe("Prompt history navigation", () => {
 		it("does nothing on Up arrow when history is empty", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);

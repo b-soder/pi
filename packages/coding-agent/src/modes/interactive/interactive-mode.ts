@@ -226,6 +226,8 @@ interface Expandable {
 
 interface ActiveEditor extends EditorComponent {
 	getCursor?(): { line: number; col: number };
+	setCursor?(line: number, col: number): void;
+	onCursorChange?: (cursor: { line: number; col: number }) => void;
 }
 
 interface WorkingStatusEditor extends EditorComponent {
@@ -482,6 +484,7 @@ export class InteractiveMode {
 	private inputSessionDraft = "";
 	private nvimInputMode: NeovimInputMode = "n";
 	private restoringInputState = false;
+	private syncingInputCursor = false;
 	private inputStateSaveTimer: NodeJS.Timeout | undefined;
 	private inputStateSaveWarningShown = false;
 	private removeInputPanelKeyListener: (() => void) | undefined;
@@ -1006,6 +1009,7 @@ export class InteractiveMode {
 				onInterrupt: () => this.handlePiInterrupt(),
 				onDraftChange: (text, mode) => this.handleNeovimDraftChange(text, mode),
 				onModeChange: (mode) => this.handleNeovimModeChange(mode),
+				onCursorChange: (cursor) => this.handleNeovimCursorChange(cursor),
 				initialText: this.inputSessionDraft,
 				initialMode: this.nvimInputMode,
 			});
@@ -1018,12 +1022,18 @@ export class InteractiveMode {
 			toolOutput: this.toolOutputContainer,
 			nvimViewport: this.nvimViewportContainer,
 			onNvimViewportLayout: (width, height) => this.nvimViewportContainer?.setViewportSize(width, height),
+			getNvimHeight: (width) => this.nvimViewportContainer?.getNaturalHeight(width, this.ui.terminal.rows) ?? 1,
+			getNvimCommandLine: (width) => this.nvimViewportContainer?.renderCommandRow(width),
 			fourPanel: this.toolOutputEnabled,
 			activity: new VStack([this.widgetContainerAbove, this.widgetContainerBelow]),
 			dividerStatus: (width) =>
 				this.activeStatusIndicator?.renderInBorder(Math.max(1, width)) ||
 				this.activeStatusIndicator?.renderSpinnerInBorder(Math.max(1, width)),
 			getInputMode: () => this.inputPanelMode,
+			getActiveInputLabel: () =>
+				this.inputPanelMode === "nvim" || (this.inputPanelMode === "both" && this.nvimViewportContainer?.focused)
+					? "nvim"
+					: "orig",
 			pendingMessages: this.pendingMessagesContainer,
 			status: this.statusContainer,
 			widgetsAbove: this.toolOutputEnabled ? undefined : this.widgetContainerAbove,
@@ -1054,14 +1064,19 @@ export class InteractiveMode {
 		this.defaultEditor.onCtrlD = () => this.handleCtrlD();
 		this.defaultEditor.onSubmit = (text) => this.handleStartupSubmit(text);
 		this.ui.setFocus(this.editor);
-		if (this.inputPanelMode === "nvim" && this.nvimViewportContainer) {
-			void this.nvimViewportContainer.ready.then(() => {
-				if (this.inputPanelMode === "nvim") this.ui.setFocus(this.nvimViewportContainer ?? null);
-			});
-		}
 
 		// Start the UI before initializing extensions so session_start handlers can use interactive dialogs
 		this.ui.start();
+		if (this.inputPanelMode === "nvim" && this.nvimViewportContainer) {
+			void this.nvimViewportContainer.ready.then(async () => {
+				const cursor = this.editor.getCursor?.();
+				if (cursor) await this.nvimViewportContainer?.setCursorPosition(cursor);
+				if (this.inputPanelMode === "nvim") {
+					this.ui.setFocus(this.nvimViewportContainer ?? null);
+					this.ui.requestRender();
+				}
+			});
+		}
 		this.isInitialized = true;
 		this.programStatus.report();
 		this.ensurePngTranscoder();
@@ -2978,6 +2993,7 @@ export class InteractiveMode {
 			// Wire up callbacks from the default editor
 			newEditor.onSubmit = this.defaultEditor.onSubmit;
 			newEditor.onChange = this.defaultEditor.onChange;
+			(newEditor as ActiveEditor).onCursorChange = this.defaultEditor.onCursorChange;
 
 			// Copy text from previous editor
 			newEditor.setText(currentText);
@@ -3212,6 +3228,7 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.session.resume", () => this.showSessionSelector());
 
 		this.defaultEditor.onChange = (text: string) => this.handleOriginalInputChange(text);
+		this.defaultEditor.onCursorChange = (cursor) => this.handleOriginalCursorChange(cursor);
 
 		// Handle clipboard paste (triggered on Ctrl+V). Copied files use their original paths,
 		// images are attached via temporary files, and plain text is the final fallback.
@@ -3248,7 +3265,7 @@ export class InteractiveMode {
 				const characterAfterCursor = cursor ? currentLine[cursor.col] : "";
 				const leadingSpace = characterBeforeCursor && !/\s/.test(characterBeforeCursor) ? " " : "";
 				const trailingSpace = characterAfterCursor && !/\s/.test(characterAfterCursor) ? " " : "";
-				this.editor.insertTextAtCursor?.(`${leadingSpace}${paths}${trailingSpace}`);
+				this.insertClipboardTextAtCursor(`${leadingSpace}${paths}${trailingSpace}`);
 				this.ui.requestRender();
 				return;
 			}
@@ -3261,19 +3278,25 @@ export class InteractiveMode {
 				const filePath = path.join(tmpDir, fileName);
 				fs.writeFileSync(filePath, Buffer.from(image.bytes));
 
-				this.editor.insertTextAtCursor?.(filePath);
+				this.insertClipboardTextAtCursor(filePath);
 				this.ui.requestRender();
 				return;
 			}
 
 			const text = await readClipboardText();
 			if (text) {
-				this.editor.insertTextAtCursor?.(text);
+				this.insertClipboardTextAtCursor(text);
 				this.ui.requestRender();
 			}
 		} catch (error) {
 			this.showError(`Failed to paste from clipboard: ${error instanceof Error ? error.message : String(error)}`);
 		}
+	}
+
+	private insertClipboardTextAtCursor(text: string): void {
+		this.editor.insertTextAtCursor?.(text);
+		const cursor = this.editor.getCursor?.();
+		if (cursor) this.handleOriginalCursorChange(cursor);
 	}
 
 	private handleInputCommand(text: string): void {
@@ -3353,11 +3376,26 @@ export class InteractiveMode {
 	}
 
 	private setInputPanelMode(mode: InputPanelMode): void {
+		const previousMode = this.inputPanelMode;
 		this.inputPanelMode = mode;
-		if (mode === "nvim" && this.nvimViewportContainer) {
-			void this.nvimViewportContainer.ready.then(() => {
-				if (this.inputPanelMode === "nvim") this.ui.setFocus(this.nvimViewportContainer ?? null);
-			});
+		const nvimViewport = this.nvimViewportContainer;
+		if (mode === "nvim" && nvimViewport) {
+			const cursor = this.editor.getCursor?.();
+			void nvimViewport.ready
+				.then(async () => {
+					if (cursor) await nvimViewport.setCursorPosition(cursor);
+					if (this.inputPanelMode === "nvim") this.ui.setFocus(nvimViewport);
+				})
+				.catch((error: unknown) => this.handleInputStateError("restore", error));
+		} else if (mode === "orig" && previousMode === "nvim" && nvimViewport) {
+			void nvimViewport
+				.getCursorPosition()
+				.then((cursor) => {
+					if (this.inputPanelMode !== "orig") return;
+					this.editor.setCursor?.(cursor.line, cursor.col);
+					this.ui.setFocus(this.editor);
+				})
+				.catch((error: unknown) => this.handleInputStateError("restore", error));
 		} else {
 			this.ui.setFocus(this.editor);
 		}
@@ -3383,6 +3421,10 @@ export class InteractiveMode {
 			if (this.nvimViewportContainer) {
 				void this.nvimViewportContainer
 					.restoreState(this.inputSessionDraft, this.nvimInputMode)
+					.then(async () => {
+						const cursor = this.editor.getCursor?.();
+						if (cursor) await this.nvimViewportContainer?.setCursorPosition(cursor);
+					})
 					.catch((error: unknown) => this.handleInputStateError("restore", error));
 			}
 		} finally {
@@ -3422,6 +3464,29 @@ export class InteractiveMode {
 		if (this.restoringInputState) return;
 		if (this.editor.getText() !== text) this.editor.setText(text);
 		else this.scheduleInputSessionStateSave();
+	}
+
+	private handleOriginalCursorChange(cursor: { line: number; col: number }): void {
+		if (
+			this.syncingInputCursor ||
+			!this.nvimViewportContainer ||
+			this.renderer.getFocusedComponent() !== this.editor
+		) {
+			return;
+		}
+		void this.nvimViewportContainer
+			.setCursorPosition(cursor)
+			.catch((error: unknown) => this.handleInputStateError("restore", error));
+	}
+
+	private handleNeovimCursorChange(cursor: { line: number; col: number }): void {
+		if (!this.nvimViewportContainer || this.renderer.getFocusedComponent() !== this.nvimViewportContainer) return;
+		this.syncingInputCursor = true;
+		try {
+			this.editor.setCursor?.(cursor.line, cursor.col);
+		} finally {
+			this.syncingInputCursor = false;
+		}
 	}
 
 	private handleNeovimModeChange(mode: NeovimInputMode): void {
