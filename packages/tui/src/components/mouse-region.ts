@@ -22,6 +22,14 @@ export class MouseRegion implements Component {
 		return this.child.render(width);
 	}
 
+	getSelectionJoinerAfterRow(row: number, width: number): string | undefined {
+		return this.child.getSelectionJoinerAfterRow?.(row, width);
+	}
+
+	getSelectionContinuationIndent(row: number, width: number): number {
+		return this.child.getSelectionContinuationIndent?.(row, width) ?? 0;
+	}
+
 	handleMouse(event: TuiMouseEvent): TuiMouseDispatchResult | TuiMouseEventResult | undefined {
 		const childResult = dispatchMouseEvent(this.child, event);
 		return childResult ?? this.onMouse(event);

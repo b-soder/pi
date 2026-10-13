@@ -6,8 +6,10 @@ import {
 	findAltScreenSearchMatches,
 } from "../src/alt-screen-search.ts";
 import { foregroundAnsi } from "../src/colors.ts";
+import { Box } from "../src/components/box.ts";
 import { HStack } from "../src/components/h-stack.ts";
 import { Image } from "../src/components/image.ts";
+import { Markdown } from "../src/components/markdown.ts";
 import { MouseRegion } from "../src/components/mouse-region.ts";
 import { ScrollView } from "../src/components/scroll-view.ts";
 import { SelectList } from "../src/components/select-list.ts";
@@ -22,9 +24,10 @@ import {
 	resetCapabilitiesCache,
 	setCapabilities,
 } from "../src/terminal-image.ts";
-import { CURSOR_MARKER, renderFakeCursor, type TuiMouseEvent } from "../src/tui.ts";
+import { Container, CURSOR_MARKER, renderFakeCursor, type TuiMouseEvent } from "../src/tui.ts";
 import { TuiAltScreen } from "../src/tui-alt-screen.ts";
 import { stripTerminalSequences, visibleWidth } from "../src/utils.ts";
+import { defaultMarkdownTheme } from "./test-themes.ts";
 import { VirtualTerminal } from "./virtual-terminal.ts";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
@@ -1436,6 +1439,119 @@ describe("TuiAltScreen", () => {
 		);
 
 		tui.stop();
+	});
+
+	it("retains the exact whitespace omitted at a word-wrap boundary", () => {
+		const text = new Text("alpha   beta gamma", 0, 0);
+		assert.ok(text.render(10).length > 1);
+		assert.strictEqual(text.getSelectionJoinerAfterRow(0, 10), "   ");
+	});
+
+	it("copies a wrapped Markdown paragraph as one line and triple-click selects its logical line", async () => {
+		const source =
+			"Yes - Pi's fullscreen copy path was treating every displayed row break as a newline. I changed it to join rows only when the renderer confirms they are a soft wrap.";
+		const terminal = new VirtualTerminal(42, 10);
+		const copied: string[] = [];
+		const tui = new TuiAltScreen(terminal, undefined, undefined, {
+			copyOnSelect: false,
+			copySelection: async (text) => {
+				copied.push(text);
+				return true;
+			},
+		});
+		const markdown = new Markdown(`${source}\n\nSecond paragraph.`, 1, 0, defaultMarkdownTheme);
+		const paragraphRows = new Markdown(source, 1, 0, defaultMarkdownTheme).render(42);
+		assert.ok(paragraphRows.length > 2);
+		const document = new Container();
+		document.addChild(markdown);
+		tui.setLayoutRoot(new ScrollView(new VStack([document, new Container()]), { follow: "none", primary: true }));
+		tui.start();
+		tui.flash = () => {};
+		try {
+			await terminal.waitForRender();
+			const lastRow = paragraphRows.length - 1;
+			const lastColumn = Math.min(40, visibleWidth(paragraphRows[lastRow]!.trimEnd()) - 1);
+			terminal.sendInput("\x1b[<0;2;1M");
+			terminal.sendInput(`\x1b[<32;${lastColumn + 1};${lastRow + 1}M`);
+			terminal.sendInput(`\x1b[<0;${lastColumn + 1};${lastRow + 1}m`);
+			await terminal.waitForRender();
+			assert.strictEqual(await tui.copyActiveSelectionToClipboard(), true);
+			assert.deepStrictEqual(copied, [source]);
+
+			tui.resetTextSelection();
+			for (let click = 0; click < 3; click++) {
+				terminal.sendInput("\x1b[<0;4;2M");
+				terminal.sendInput("\x1b[<0;4;2m");
+			}
+			await terminal.waitForRender();
+			assert.strictEqual(await tui.copyActiveSelectionToClipboard(), true);
+			assert.deepStrictEqual(copied, [source, source]);
+		} finally {
+			tui.stop();
+		}
+	});
+
+	it("copies dropped whitespace from a word-wrap boundary", async () => {
+		const terminal = new VirtualTerminal(10, 4);
+		const copied: string[] = [];
+		const tui = new TuiAltScreen(terminal, undefined, undefined, {
+			copyOnSelect: false,
+			copySelection: async (text) => {
+				copied.push(text);
+				return true;
+			},
+		});
+		tui.setLayoutRoot(new Text("alpha   beta gamma", 0, 0));
+		tui.start();
+		try {
+			await terminal.waitForRender();
+			terminal.sendInput("\x1b[<0;1;1M");
+			terminal.sendInput("\x1b[<32;10;2M");
+			terminal.sendInput("\x1b[<0;10;2m");
+			await terminal.waitForRender();
+			assert.strictEqual(await tui.copyActiveSelectionToClipboard(), true);
+			assert.deepStrictEqual(copied, ["alpha   beta gamma"]);
+		} finally {
+			tui.stop();
+		}
+	});
+
+	it("copies tool-style soft-wrapped rows without newlines while retaining explicit source line breaks", async () => {
+		const terminal = new VirtualTerminal(20, 6);
+		const copied: string[] = [];
+		const tui = new TuiAltScreen(terminal, undefined, undefined, {
+			copyOnSelect: false,
+			copySelection: async (text) => {
+				copied.push(text);
+				return true;
+			},
+		});
+		const content = new Container();
+		const box = new Box(1, 0);
+		const sourceText = new Text("abcdefghijklmnopqrstuvwx\nshort", 0, 0);
+		assert.strictEqual(sourceText.getSelectionJoinerAfterRow(0, 18), "");
+		box.addChild(new MouseRegion(sourceText, () => undefined));
+		content.addChild(box);
+		tui.setLayoutRoot(new ScrollView(content, { follow: "end", primary: true }));
+		tui.start();
+		try {
+			await terminal.waitForRender();
+			terminal.sendInput("\x1b[<0;2;1M");
+			terminal.sendInput("\x1b[<32;8;2M");
+			terminal.sendInput("\x1b[<0;8;2m");
+			await terminal.waitForRender();
+			assert.strictEqual(await tui.copyActiveSelectionToClipboard(), true);
+			assert.deepStrictEqual(copied, ["abcdefghijklmnopqrstuvwx"]);
+
+			terminal.sendInput("\x1b[<0;2;1M");
+			terminal.sendInput("\x1b[<32;6;3M");
+			terminal.sendInput("\x1b[<0;6;3m");
+			await terminal.waitForRender();
+			assert.strictEqual(await tui.copyActiveSelectionToClipboard(), true);
+			assert.deepStrictEqual(copied, ["abcdefghijklmnopqrstuvwx", "abcdefghijklmnopqrstuvwx\n short"]);
+		} finally {
+			tui.stop();
+		}
 	});
 
 	it("uses an injected copySelection handler instead of OSC 52 and reports success", async () => {

@@ -1,5 +1,7 @@
-import { Container, ScrollView, Text, VStack } from "@earendil-works/pi-tui";
-import { describe, expect, test } from "vitest";
+import { spawnSync } from "node:child_process";
+import { stripVTControlCharacters } from "node:util";
+import { Container, CURSOR_MARKER, ScrollView, Text, VStack } from "@earendil-works/pi-tui";
+import { describe, expect, test, vi } from "vitest";
 import { Editor } from "../../tui/src/components/editor.ts";
 import { renderLayoutFrame } from "../../tui/src/layout.ts";
 import { TuiAltScreen } from "../../tui/src/tui-alt-screen.ts";
@@ -7,6 +9,9 @@ import { TuiMainScreen } from "../../tui/src/tui-main-screen.ts";
 import { defaultEditorTheme } from "../../tui/test/test-themes.ts";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
 import { createChatViewport } from "../src/modes/interactive/chat-viewport.ts";
+import { NeovimViewport } from "../src/modes/interactive/components/neovim-viewport.ts";
+
+const hasNeovim = spawnSync(process.env.NVIM ?? "nvim", ["--version"], { stdio: "ignore" }).status === 0;
 
 describe("chat viewport", () => {
 	test("defaults the transcript scrollbar to auto and accepts overrides", () => {
@@ -177,6 +182,164 @@ describe("chat viewport", () => {
 			expect(frame.root.children.at(-1)!.rect.height).toBe(footerHeight);
 		}
 	});
+
+	test("auto-sizes Neovim from one buffer row while its command line replaces the footer divider", () => {
+		const natural = { height: 1 };
+		const mode = { value: "nvim" as "orig" | "nvim" | "both" };
+		const active = { value: "nvim" as "orig" | "nvim" };
+		const command = { value: `:%s/foo/bar/g${CURSOR_MARKER}` };
+		const assigned: number[] = [];
+		const viewport = createChatViewport({
+			document: new Container(),
+			toolOutput: new Container(),
+			nvimViewport: new Text("draft", 0, 0),
+			fourPanel: true,
+			getInputMode: () => mode.value,
+			getActiveInputLabel: () => active.value,
+			getNvimHeight: () => natural.height,
+			getNvimCommandLine: () => command.value,
+			onNvimViewportLayout: (_width, height) => assigned.push(height),
+			pendingMessages: new Container(),
+			status: new Container(),
+			editor: new Text("ORIGINAL INPUT", 0, 0),
+			footer: new Text("footer", 0, 0),
+			getTerminalRows: () => 24,
+			getTerminalColumns: () => 80,
+		});
+		const render = () => renderLayoutFrame(viewport.root, 80, 24, () => {});
+		let frame = render();
+		expect(frame.root.children[4]!.rect.height).toBe(1);
+		expect(assigned.at(-1)).toBe(1);
+		expect(frame.root.children[5]!.rect.height).toBe(1);
+		expect(frame.root.children[5]!.lines?.[0] ?? "").toContain(`:%s/foo/bar/g${CURSOR_MARKER}`);
+		expect(frame.root.children[5]!.lines?.[0] ?? "").toMatch(/─+ nvim $/);
+		const footerY = frame.root.children.at(-1)!.rect.y;
+		expect(frame.root.children[5]!.rect.y + 1).toBe(footerY);
+
+		natural.height = 4;
+		frame = render();
+		expect(frame.root.children[4]!.rect.height).toBe(4);
+		expect(assigned.at(-1)).toBe(4);
+		expect(frame.root.children[5]!.rect.y + 1).toBe(frame.root.children.at(-1)!.rect.y);
+
+		mode.value = "both";
+		active.value = "orig";
+		frame = render();
+		expect(frame.root.children[7]!.lines?.[0] ?? "").toContain(":%s/foo/bar/g");
+		expect(frame.root.children[7]!.lines?.[0] ?? "").toMatch(/─+ orig $/);
+		expect(frame.root.children[5]!.lines?.[0] ?? "").not.toContain(":%s/foo/bar/g");
+		active.value = "nvim";
+		frame = render();
+		expect(frame.root.children[7]!.lines?.[0] ?? "").toMatch(/─+ nvim $/);
+
+		command.value = `${"x".repeat(78)}${CURSOR_MARKER}`;
+		frame = render();
+		expect(frame.root.children[7]!.lines?.[0] ?? "").toContain(command.value);
+		expect(frame.root.children[7]!.lines?.[0] ?? "").not.toContain(" nvim ");
+		mode.value = "orig";
+		active.value = "orig";
+		frame = render();
+		expect(frame.root.children[5]!.lines?.[0] ?? "").toMatch(/─+ orig $/);
+	});
+
+	for (const [label, separator] of [
+		["LF", "\n"],
+		["CR", "\r"],
+		["CRLF", "\r\n"],
+	] as const) {
+		test.skipIf(!hasNeovim)(
+			`grows real Neovim after ${label} paste and keeps the shared cursor on the last line`,
+			async () => {
+				const tui = new TuiMainScreen(new VirtualTerminal(40, 40));
+				const pastedBlock = "123\n123\n123";
+				const editor = new Editor(tui, defaultEditorTheme);
+				editor.setPanelBordersHidden(true);
+				const nvim = new NeovimViewport(
+					tui,
+					{
+						onSubmit: () => {},
+						onQuit: () => {},
+						initialMode: "i",
+						onDraftChange: (text) => editor.setText(text),
+					},
+					["--embed", "-n"],
+				);
+				editor.onChange = (text) => {
+					if (nvim.getText() !== text) nvim.setText(text);
+				};
+				const viewport = createChatViewport({
+					document: new Container(),
+					toolOutput: new Container(),
+					nvimViewport: nvim,
+					fourPanel: true,
+					getInputMode: () => "nvim",
+					getNvimHeight: (width) => nvim.getNaturalHeight(width, 40),
+					getNvimCommandLine: (width) => nvim.renderCommandRow(width),
+					onNvimViewportLayout: (width, height) => nvim.setViewportSize(width, height),
+					pendingMessages: new Container(),
+					status: new Container(),
+					editor,
+					footer: new Text("footer", 0, 0),
+					getTerminalRows: () => 40,
+					getTerminalColumns: () => 40,
+				});
+				try {
+					await nvim.ready;
+					const mirrorWrite = vi.spyOn(nvim, "setText");
+					tui.setFocus(nvim);
+					let frame = renderLayoutFrame(viewport.root, 40, 40, () => {});
+					expect(frame.root.children[4]!.rect.height).toBe(1);
+					expect(await nvim.getMode()).toBe("i");
+					const frames: Array<{ panelHeight: number; gridHeight: number; cursorRow: number; rows: string[] }> = [];
+					const originalRequestRender = tui.requestRender.bind(tui);
+					const renderSpy = vi.spyOn(tui, "requestRender").mockImplementation(() => {
+						const next = renderLayoutFrame(viewport.root, 40, 40, () => {});
+						const panel = next.root.children[4]!.rect;
+						frames.push({
+							panelHeight: panel.height,
+							gridHeight: (nvim as any).grids.get(1)?.length ?? 0,
+							cursorRow: (nvim as any).cursor.row,
+							rows: next.lines.slice(panel.y, panel.y + panel.height),
+						});
+						originalRequestRender();
+					});
+					nvim.handleInput(`\x1b[200~${pastedBlock.split("\n").join(separator)}\x1b[201~`);
+					await vi.waitFor(async () => expect(await nvim.getBufferLines()).toEqual(pastedBlock.split("\n")), {
+						timeout: 3000,
+					});
+					await vi.waitFor(() => {
+						frame = renderLayoutFrame(viewport.root, 40, 40, () => {});
+						expect(frame.root.children[4]!.rect.height).toBe(3);
+					});
+					await vi.waitFor(async () => expect(await nvim.getCursorPosition()).toEqual({ line: 2, col: 3 }));
+					await vi.waitFor(() => expect((nvim as any).cursor.row).toBe(2));
+					await new Promise((resolve) => setTimeout(resolve, 180)); // Allow the debounced Lua draft/cursor notification.
+					expect((nvim as any).cursor.row).toBe(2);
+					expect(editor.getText()).toBe(pastedBlock);
+					expect(editor.getCursor()).toEqual({ line: 2, col: 3 });
+					expect(mirrorWrite).not.toHaveBeenCalled();
+					const growingFrames = frames.filter((frame) => frame.panelHeight === 3);
+					expect(growingFrames.some((frame) => frame.gridHeight === 2)).toBe(true);
+					for (const growing of growingFrames) {
+						expect(
+							growing.rows.map((row) => stripVTControlCharacters(row.replaceAll(CURSOR_MARKER, "")).trim()),
+						).toEqual(["123", "123", "123"]);
+						expect(growing.rows[2]).toContain(CURSOR_MARKER);
+					}
+					renderSpy.mockRestore();
+					frame = renderLayoutFrame(viewport.root, 40, 40, () => {}, 1);
+					const cursorRows = frame.lines.flatMap((line, row) => (line.includes(CURSOR_MARKER) ? [row] : []));
+					expect(cursorRows).toEqual([frame.root.children[4]!.rect.y + 2]);
+					expect(await nvim.getMode()).toBe("i");
+					await nvim.replaceBuffer("");
+					frame = renderLayoutFrame(viewport.root, 40, 40, () => {});
+					expect(frame.root.children[4]!.rect.height).toBe(1);
+				} finally {
+					nvim.dispose();
+				}
+			},
+		);
+	}
 
 	test("can stop the fullscreen renderer without overflowing panel sizing", async () => {
 		const terminal = new VirtualTerminal(80, 40);

@@ -3,6 +3,7 @@ import { renderLatex } from "../latex.ts";
 import { getCapabilities, hyperlink, isImageLine } from "../terminal-image.ts";
 import type { Component } from "../tui.ts";
 import { applyBackgroundToLine, flattenLines, visibleWidth, wrapTextWithAnsi } from "../utils.ts";
+import { Text } from "./text.ts";
 
 const STRICT_STRIKETHROUGH_REGEX = /^(~~)(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))\1(?=[^~]|$)/;
 
@@ -246,6 +247,9 @@ export class Markdown implements Component {
 	private cachedText?: string;
 	private cachedWidth?: number;
 	private cachedLines?: string[];
+	private cachedRenderedLines?: string[];
+	private cachedJoinerWidth?: number;
+	private cachedJoiners?: Array<string | undefined>;
 	// Parsed tokens depend only on the source, so they survive theme and width invalidation. Held weakly: a token tree is
 	// about ten times the size of its source, and every message of a long transcript keeps a Markdown component. The
 	// tokens survive a burst of re-renders, such as a theme preview, and are collected afterwards.
@@ -276,6 +280,35 @@ export class Markdown implements Component {
 		this.cachedText = undefined;
 		this.cachedWidth = undefined;
 		this.cachedLines = undefined;
+		this.cachedRenderedLines = undefined;
+		this.cachedJoiners = undefined;
+	}
+
+	getSelectionContinuationIndent(_row: number, _width: number): number {
+		return this.paddingX;
+	}
+
+	getSelectionJoinerAfterRow(row: number, width: number): string | undefined {
+		if (this.cachedWidth !== width || !this.cachedRenderedLines) this.render(width);
+		if (this.cachedJoinerWidth === width && this.cachedJoiners) return this.cachedJoiners[row];
+		const contentWidth = Math.max(1, width - this.paddingX * 2);
+		const joiners: Array<string | undefined> = [];
+		let visualRow = this.paddingY;
+		for (const source of this.cachedRenderedLines ?? []) {
+			if (isImageLine(source)) {
+				visualRow++;
+				continue;
+			}
+			const text = new Text(source, 0, 0);
+			const lineCount = wrapTextWithAnsi(source, contentWidth).length;
+			for (let index = 0; index < lineCount - 1; index++) {
+				joiners[visualRow + index] = text.getSelectionJoinerAfterRow(index, contentWidth);
+			}
+			visualRow += lineCount;
+		}
+		this.cachedJoinerWidth = width;
+		this.cachedJoiners = joiners;
+		return joiners[row];
 	}
 
 	render(width: number): string[] {
@@ -295,6 +328,7 @@ export class Markdown implements Component {
 			this.cachedText = this.text;
 			this.cachedWidth = width;
 			this.cachedLines = result;
+			this.cachedRenderedLines = [];
 			return result;
 		}
 
@@ -374,6 +408,8 @@ export class Markdown implements Component {
 		this.cachedText = this.text;
 		this.cachedWidth = width;
 		this.cachedLines = result;
+		this.cachedRenderedLines = renderedLines;
+		this.cachedJoiners = undefined;
 
 		return result.length > 0 ? result : [""];
 	}

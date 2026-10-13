@@ -1,8 +1,28 @@
+import { spawnSync } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, test, vi } from "vitest";
+import { Editor } from "../../tui/src/components/editor.ts";
+import { TuiMainScreen } from "../../tui/src/tui-main-screen.ts";
+import { defaultEditorTheme } from "../../tui/test/test-themes.ts";
+import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
+import { NeovimViewport } from "../src/modes/interactive/components/neovim-viewport.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
-type NvimMock = { getText: () => string; setText: (text: string) => void };
-type EditorMock = { getText: () => string; setText: (text: string) => void };
+const hasNeovim = spawnSync(process.env.NVIM ?? "nvim", ["--version"], { stdio: "ignore" }).status === 0;
+const piLuaPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../nvim/.config/nvim/lua/custom/pi.lua");
+
+type NvimMock = {
+	getText: () => string;
+	setText: (text: string) => void;
+	setCursorPosition?: (cursor: { line: number; col: number }) => Promise<void>;
+};
+type EditorMock = {
+	getText: () => string;
+	setText: (text: string) => void;
+	setCursor?: (line: number, col: number) => void;
+	getCursor?: () => { line: number; col: number };
+};
 
 type InputStateThis = {
 	inputSessionDraft: string;
@@ -22,6 +42,24 @@ const prototype = InteractiveMode.prototype as unknown as {
 	handleOriginalInputChange(this: InputStateThis, text: string): void;
 	handleNeovimDraftChange(this: InputStateThis, text: string, mode: "i" | "n"): void;
 	submitFromNeovim(this: InputStateThis, text: string): void;
+	handleOriginalCursorChange(this: CursorStateThis, cursor: { line: number; col: number }): void;
+	handleNeovimCursorChange(this: CursorStateThis, cursor: { line: number; col: number }): void;
+	insertClipboardTextAtCursor(this: ClipboardStateThis, text: string): void;
+	setInputPanelMode(this: any, mode: "orig" | "nvim"): void;
+};
+
+type CursorStateThis = {
+	syncingInputCursor: boolean;
+	nvimViewportContainer?: NvimMock;
+	editor: EditorMock;
+	renderer: { getFocusedComponent: () => unknown };
+};
+
+type ClipboardStateThis = {
+	editor: EditorMock & {
+		insertTextAtCursor: (text: string) => void;
+	};
+	handleOriginalCursorChange: (cursor: { line: number; col: number }) => void;
 };
 
 describe("InteractiveMode input state", () => {
@@ -108,6 +146,131 @@ describe("InteractiveMode input state", () => {
 		expect(context.inputSessionDraft).toBe("current draft");
 		expect(editor.setText).not.toHaveBeenCalled();
 	});
+
+	test("mirrors original-editor cursor changes into Neovim", async () => {
+		const setCursorPosition = vi.fn(async () => {});
+		const editor = { getText: () => "first\nsecond", setText: vi.fn() };
+		const nvim = { getText: () => "first\nsecond", setText: vi.fn(), setCursorPosition };
+		const context: CursorStateThis = {
+			syncingInputCursor: false,
+			nvimViewportContainer: nvim,
+			editor,
+			renderer: { getFocusedComponent: () => editor },
+		};
+
+		prototype.handleOriginalCursorChange.call(context, { line: 1, col: 3 });
+
+		expect(setCursorPosition).toHaveBeenCalledWith({ line: 1, col: 3 });
+	});
+
+	test("mirrors focused Neovim cursor changes into the original editor", () => {
+		const editor = { getText: () => "first\nsecond", setText: vi.fn(), setCursor: vi.fn() };
+		const nvim = { getText: () => "first\nsecond", setText: vi.fn() };
+		const context: CursorStateThis = {
+			syncingInputCursor: false,
+			nvimViewportContainer: nvim,
+			editor,
+			renderer: { getFocusedComponent: () => nvim },
+		};
+
+		prototype.handleNeovimCursorChange.call(context, { line: 1, col: 3 });
+
+		expect(editor.setCursor).toHaveBeenCalledWith(1, 3);
+		expect(context.syncingInputCursor).toBe(false);
+	});
+
+	test("syncs the cursor after clipboard text is inserted programmatically", () => {
+		const cursor = { line: 4, col: 10 };
+		const insertTextAtCursor = vi.fn();
+		const handleOriginalCursorChange = vi.fn();
+		const context: ClipboardStateThis = {
+			editor: {
+				getText: () => "",
+				setText: vi.fn(),
+				getCursor: () => cursor,
+				insertTextAtCursor,
+			},
+			handleOriginalCursorChange,
+		};
+
+		prototype.insertClipboardTextAtCursor.call(context, "multiline clipboard text");
+
+		expect(insertTextAtCursor).toHaveBeenCalledWith("multiline clipboard text");
+		expect(handleOriginalCursorChange).toHaveBeenCalledWith(cursor);
+	});
+
+	test("does not let hidden Neovim cursor updates move the active original editor", () => {
+		const editor = { getText: () => "draft", setText: vi.fn(), setCursor: vi.fn() };
+		const nvim = { getText: () => "draft", setText: vi.fn() };
+		const context: CursorStateThis = {
+			syncingInputCursor: false,
+			nvimViewportContainer: nvim,
+			editor,
+			renderer: { getFocusedComponent: () => editor },
+		};
+
+		prototype.handleNeovimCursorChange.call(context, { line: 0, col: 2 });
+
+		expect(editor.setCursor).not.toHaveBeenCalled();
+	});
+
+	test.skipIf(!hasNeovim)(
+		"keeps the same cursor after multiline paste, panel switches, and Neovim movement",
+		async () => {
+			const tui = new TuiMainScreen(new VirtualTerminal(40, 40));
+			const editor = new Editor(tui, defaultEditorTheme);
+			const text = "1234567890\n\n1234567890x\n\n1234567890";
+			let context: InteractiveMode;
+			const viewport = new NeovimViewport(
+				tui,
+				{
+					onSubmit: () => {},
+					onQuit: () => {},
+					onDraftChange: (draft, mode) => prototype.handleNeovimDraftChange.call(context as any, draft, mode),
+					onCursorChange: (cursor) => prototype.handleNeovimCursorChange.call(context as any, cursor),
+					initialMode: "i",
+				},
+				["--embed", "-n", "-u", "NONE", "--cmd", `lua dofile(${JSON.stringify(piLuaPath)})`],
+			);
+			context = Object.assign(Object.create(InteractiveMode.prototype), {
+				inputPanelMode: "orig",
+				inputSessionDraft: "",
+				nvimInputMode: "i",
+				restoringInputState: false,
+				syncingInputCursor: false,
+				isBashMode: false,
+				nvimViewportContainer: viewport,
+				editor,
+				renderer: tui,
+				ui: tui,
+				updateEditorBorderColor: () => {},
+				scheduleInputSessionStateSave: () => {},
+			}) as InteractiveMode;
+			editor.onChange = (draft) => prototype.handleOriginalInputChange.call(context as any, draft);
+			tui.setFocus(editor);
+			try {
+				await viewport.ready;
+				editor.insertTextAtCursor(text);
+				const expected = { line: 4, col: 10 };
+				expect(editor.getCursor()).toEqual(expected);
+				prototype.handleOriginalCursorChange.call(context as any, expected);
+				viewport.setViewportSize(40, viewport.getNaturalHeight(40, 40));
+				prototype.setInputPanelMode.call(context, "nvim");
+				await vi.waitFor(() => expect(tui.getFocusedComponent()).toBe(viewport));
+				await vi.waitFor(async () => expect(await viewport.getBufferLines()).toEqual(text.split("\n")));
+				await vi.waitFor(async () => expect(await viewport.getCursorPosition()).toEqual(expected));
+				await vi.waitFor(() => expect((viewport as any).cursor.row).toBe(4));
+
+				viewport.handleInput("\x1b[D");
+				await vi.waitFor(() => expect(editor.getCursor()).toEqual({ line: 4, col: 9 }));
+				prototype.setInputPanelMode.call(context, "orig");
+				await vi.waitFor(() => expect(tui.getFocusedComponent()).toBe(editor));
+				expect(editor.getCursor()).toEqual({ line: 4, col: 9 });
+			} finally {
+				viewport.dispose();
+			}
+		},
+	);
 
 	test("Neovim submission uses Pi's normal submit handler and clears both editors", () => {
 		const editor = { getText: () => "draft", setText: vi.fn() };

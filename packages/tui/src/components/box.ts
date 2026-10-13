@@ -103,6 +103,34 @@ export class Box implements Component {
 		return undefined;
 	}
 
+	getSelectionJoinerAfterRow(row: number, width: number): string | undefined {
+		const contentWidth = Math.max(1, width - this.paddingX * 2);
+		let offset = this.paddingY;
+		for (const child of this.children) {
+			const height = child.render(contentWidth).length;
+			if (row >= offset && row < offset + height) {
+				return row + 1 < offset + height
+					? child.getSelectionJoinerAfterRow?.(row - offset, contentWidth)
+					: undefined;
+			}
+			offset += height;
+		}
+		return undefined;
+	}
+
+	getSelectionContinuationIndent(row: number, width: number): number {
+		const contentWidth = Math.max(1, width - this.paddingX * 2);
+		let offset = this.paddingY;
+		for (const child of this.children) {
+			const height = child.render(contentWidth).length;
+			if (row >= offset && row < offset + height) {
+				return this.paddingX + (child.getSelectionContinuationIndent?.(row - offset, contentWidth) ?? 0);
+			}
+			offset += height;
+		}
+		return 0;
+	}
+
 	render(width: number): string[] {
 		if (this.children.length === 0) {
 			return [];

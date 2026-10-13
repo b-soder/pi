@@ -10,6 +10,41 @@ afterEach(() => {
 });
 
 describe("CustomEditor prompt history keybindings", () => {
+	it("reports cursor changes after editor input, including cursor-only movement", () => {
+		const keybindings = new KeybindingsManager();
+		setKeybindings(keybindings);
+		const editor = new CustomEditor(new TuiMainScreen(new VirtualTerminal()), defaultEditorTheme, keybindings);
+		const cursorChanges: Array<{ line: number; col: number }> = [];
+		editor.onCursorChange = (cursor) => cursorChanges.push(cursor);
+		editor.setText("abc");
+		editor.setCursor(0, 1);
+
+		editor.handleInput("X");
+		expect(editor.getText()).toBe("aXbc");
+		expect(cursorChanges.at(-1)).toEqual({ line: 0, col: 2 });
+
+		editor.handleInput("\x1b[D");
+		expect(cursorChanges.at(-1)).toEqual({ line: 0, col: 1 });
+
+		editor.render(40);
+		editor.handleMouse({
+			type: "click",
+			button: "left",
+			clickCount: 1,
+			x: 4,
+			y: 1,
+			screenX: 4,
+			screenY: 1,
+			width: 40,
+			height: 8,
+			shift: false,
+			alt: false,
+			ctrl: false,
+		});
+		expect(cursorChanges.at(-1)).toEqual(editor.getCursor());
+		expect(editor.getCursor()).toEqual({ line: 0, col: 4 });
+	});
+
 	it("gives an explicit history binding precedence over model cycling", () => {
 		const keybindings = new KeybindingsManager({
 			"tui.editor.historyPrevious": "ctrl+p",

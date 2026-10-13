@@ -75,6 +75,17 @@ export class VisualLinePreview implements Component {
 		this.options = options;
 	}
 
+	getSelectionJoinerAfterRow(row: number, width: number): string | undefined {
+		const text = new Text(this.options.text, 0, 0);
+		const fullHeight = text.render(width).length;
+		const skipped = Math.max(0, fullHeight - this.options.maxVisualLines);
+		if (skipped && this.options.keep === "end") {
+			return row === 0 ? undefined : text.getSelectionJoinerAfterRow(row - 1 + skipped, width);
+		}
+		if (skipped && row >= this.options.maxVisualLines - 1) return undefined;
+		return text.getSelectionJoinerAfterRow(row, width);
+	}
+
 	render(width: number): string[] {
 		if (this.cachedLines === undefined || this.cachedWidth !== width) {
 			const { text, maxVisualLines, keep, formatHint } = this.options;

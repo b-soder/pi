@@ -1,5 +1,11 @@
 import type { Component } from "../tui.ts";
-import { applyBackgroundToLine, flattenLines, visibleWidth, wrapTextWithAnsi } from "../utils.ts";
+import {
+	applyBackgroundToLine,
+	flattenLines,
+	stripTerminalSequences,
+	visibleWidth,
+	wrapTextWithAnsi,
+} from "../utils.ts";
 
 /**
  * Text component - displays multi-line text with word wrapping
@@ -14,6 +20,8 @@ export class Text implements Component {
 	private cachedText?: string;
 	private cachedWidth?: number;
 	private cachedLines?: string[];
+	private cachedJoinerWidth?: number;
+	private cachedJoiners?: Array<string | undefined>;
 
 	constructor(text: string = "", paddingX: number = 1, paddingY: number = 1, customBgFn?: (text: string) => string) {
 		this.text = text;
@@ -27,6 +35,7 @@ export class Text implements Component {
 		this.cachedText = undefined;
 		this.cachedWidth = undefined;
 		this.cachedLines = undefined;
+		this.cachedJoiners = undefined;
 	}
 
 	setCustomBgFn(customBgFn?: (text: string) => string): void {
@@ -45,6 +54,36 @@ export class Text implements Component {
 		this.cachedText = undefined;
 		this.cachedWidth = undefined;
 		this.cachedLines = undefined;
+		this.cachedJoiners = undefined;
+	}
+
+	getSelectionContinuationIndent(_row: number, width: number): number {
+		return Math.min(this.paddingX, Math.max(0, Math.floor((width - 1) / 2)));
+	}
+
+	getSelectionJoinerAfterRow(row: number, width: number): string | undefined {
+		if (!this.text || this.text.trim() === "") return undefined;
+		if (this.cachedJoinerWidth === width && this.cachedJoiners) return this.cachedJoiners[row];
+		const paddingX = Math.min(this.paddingX, Math.max(0, Math.floor((width - 1) / 2)));
+		const contentWidth = Math.max(1, width - paddingX * 2);
+		const joiners: Array<string | undefined> = [];
+		let visualRow = this.paddingY;
+		for (const source of this.text.replace(/\t/g, "   ").split(/\r\n|\r|\n/)) {
+			const pieces = wrapTextWithAnsi(source, contentWidth);
+			const plainSource = stripTerminalSequences(source);
+			let offset = 0;
+			for (let index = 0; index < pieces.length; index++) {
+				const piece = stripTerminalSequences(pieces[index]!).trimEnd();
+				const start = plainSource.indexOf(piece, offset);
+				if (start < 0) break; // Unknown renderer boundary: preserve the newline.
+				if (index > 0) joiners[visualRow + index - 1] = plainSource.slice(offset, start);
+				offset = start + piece.length;
+			}
+			visualRow += pieces.length;
+		}
+		this.cachedJoinerWidth = width;
+		this.cachedJoiners = joiners;
+		return joiners[row];
 	}
 
 	render(width: number): string[] {

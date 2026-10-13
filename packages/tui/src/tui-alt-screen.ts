@@ -1239,10 +1239,42 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		};
 	}
 
+	private getSelectionLeadingIndent(point: SelectionPoint): number {
+		if (!this.currentLayout) return 0;
+		if (point.scrollView) {
+			const content = getScrollViewBox(this.currentLayout, point.scrollView)?.children[0];
+			return content?.component.getSelectionContinuationIndent?.(point.row, content.rect.width) ?? 0;
+		}
+		const box = getLayoutBoxesAt(this.currentLayout, point.col, point.row).find(
+			(candidate) => candidate.component.getSelectionContinuationIndent,
+		);
+		return (
+			box?.component.getSelectionContinuationIndent?.(
+				point.row - box.rect.y + (box.lineOffset ?? 0),
+				box.rect.width,
+			) ?? 0
+		);
+	}
+
 	private getLineSelection(point: SelectionPoint): SelectionRange {
+		const selection = { start: point, end: point };
+		let firstRow = point.row;
+		while (firstRow > 0 && this.getSelectionContinuation(firstRow - 1, selection)) firstRow--;
+		let lastRow = point.row;
+		const contentLength =
+			point.scrollView && this.currentLayout
+				? getScrollViewBox(this.currentLayout, point.scrollView)?.scrollContentLines?.length
+				: undefined;
+		const maxRow = point.scrollView ? (contentLength ?? point.row + 1) - 1 : this.terminal.rows - 1;
+		while (lastRow < maxRow && this.getSelectionContinuation(lastRow, selection)) lastRow++;
 		return {
-			start: { ...point, col: 0 },
-			end: { ...point, col: visibleWidth(this.getSelectionSourceLine(point)), boundary: true },
+			start: { ...point, row: firstRow, col: this.getSelectionLeadingIndent({ ...point, row: firstRow }) },
+			end: {
+				...point,
+				row: lastRow,
+				col: visibleWidth(this.getSelectionSourceLine({ ...point, row: lastRow })),
+				boundary: true,
+			},
 		};
 	}
 
@@ -1465,6 +1497,37 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		return { start: Math.max(minColumn, start), end: Math.min(maxColumn, end) };
 	}
 
+	private getSelectionContinuation(
+		row: number,
+		selection: { start: SelectionPoint; end: SelectionPoint },
+	): { joiner: string; indent: number } | undefined {
+		if (!this.currentLayout) return undefined;
+		let component: Component | undefined;
+		let localRow = row;
+		let width: number;
+		if (selection.start.scrollView) {
+			const box = getScrollViewBox(this.currentLayout, selection.start.scrollView)?.children[0];
+			if (!box) return undefined;
+			component = box.component;
+			width = box.rect.width;
+		} else {
+			const box = getLayoutBoxesAt(this.currentLayout, selection.start.col, row).find(
+				(candidate) =>
+					candidate.component.getSelectionJoinerAfterRow &&
+					row + 1 < candidate.rect.y + candidate.rect.height &&
+					row >= candidate.rect.y,
+			);
+			if (!box) return undefined;
+			component = box.component;
+			localRow = row - box.rect.y + (box.lineOffset ?? 0);
+			width = box.rect.width;
+		}
+		const joiner = component.getSelectionJoinerAfterRow?.(localRow, width);
+		return joiner === undefined
+			? undefined
+			: { joiner, indent: component.getSelectionContinuationIndent?.(localRow, width) ?? 0 };
+	}
+
 	private getActiveSelectionText(): string | undefined {
 		const selection = this.getSelectionBounds();
 		if (!selection) return undefined;
@@ -1493,7 +1556,13 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 				).trimEnd(),
 			);
 		}
-		const text = lines.join("\n");
+		const text = lines.reduce((result, line, index) => {
+			if (index === 0) return line;
+			const continuation = this.getSelectionContinuation(selection.start.row + index - 1, selection);
+			return continuation
+				? `${result}${continuation.joiner}${line.slice(continuation.indent)}`
+				: `${result}\n${line}`;
+		}, "");
 		return text.length === 0 ? undefined : text;
 	}
 
