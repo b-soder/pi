@@ -37,6 +37,24 @@ describe("per-session input state", () => {
 		expect(readInputSessionState(statePath, "session-1")).toBeUndefined();
 	});
 
+	test("persists an explicit border color or the theme-default override", () => {
+		tempDir = mkdtempSync(join(tmpdir(), "pi-input-state-"));
+		const statePath = getInputSessionStatePath(join(tempDir, "session.jsonl"));
+		const state = {
+			sessionId: "session-border",
+			draft: "",
+			inputPanelMode: "orig" as const,
+			nvimMode: "n" as const,
+			borderColor: "#A1B2C3",
+		};
+
+		writeInputSessionState(statePath, state);
+		expect(readInputSessionState(statePath, "session-border")).toEqual(state);
+
+		writeInputSessionState(statePath, { ...state, borderColor: null });
+		expect(readInputSessionState(statePath, "session-border")).toEqual({ ...state, borderColor: null });
+	});
+
 	test("ignores malformed sidecars and invalid state values", () => {
 		tempDir = mkdtempSync(join(tmpdir(), "pi-input-state-"));
 		const statePath = getInputSessionStatePath(join(tempDir, "session.jsonl"));
