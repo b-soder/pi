@@ -53,6 +53,12 @@ For a built-in AI provider, run `/login` inside Pi to connect a subscription or 
 
 See the [documentation](https://pi.dev/docs/latest) for full setup and usage instructions, or [visit pi.dev](https://pi.dev) for demos.
 
+## Optional Pi integrations
+
+[`px-harness`](https://github.com/b-soder/px-harness) is a separate, optional set of Pi extensions, packages, shared runtime, and shell/editor integrations. It is not part of the Pi core and does not change the standard Pi installation above. The current harness compatibility pin is Pi commit `a37ceef585b55eb96bdec00b3da875729708ed87`.
+
+Keep `px-harness` in its own checkout; do not nest it inside the Pi source tree. Its [README](https://github.com/b-soder/px-harness/blob/main/README.md) covers checkout, build, package dependencies, optional components, and account setup. Choose only the integrations you want; they require recipient-local settings and credentials where applicable.
+
 ## Run with Nix
 
 ```bash
