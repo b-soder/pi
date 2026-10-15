@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { readBorderColor } from "./border-color.ts";
 
 export type InputPanelMode = "orig" | "nvim" | "both";
 export type NeovimInputMode = "i" | "n";
@@ -10,6 +11,8 @@ export interface InputSessionState {
 	draft: string;
 	inputPanelMode: InputPanelMode;
 	nvimMode: NeovimInputMode;
+	/** A color string persists an explicit color; null persists /border default. */
+	borderColor?: string | null;
 }
 
 export function getInputSessionStatePath(sessionFile: string): string {
@@ -29,11 +32,20 @@ export function readInputSessionState(filePath: string, sessionId: string): Inpu
 		) {
 			return undefined;
 		}
+		let borderColor: string | null | undefined;
+		if (Object.hasOwn(data, "borderColor")) {
+			if (data.borderColor === null) borderColor = null;
+			else if (typeof data.borderColor === "string") {
+				borderColor = readBorderColor(data.borderColor);
+				if (!borderColor) return undefined;
+			} else return undefined;
+		}
 		return {
 			sessionId,
 			draft: data.draft,
 			inputPanelMode: data.inputPanelMode,
 			nvimMode: data.nvimMode,
+			...(borderColor !== undefined ? { borderColor } : {}),
 		};
 	} catch {
 		return undefined;

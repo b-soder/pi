@@ -1,12 +1,16 @@
 import { spawnSync } from "node:child_process";
-import { dirname, resolve } from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test, vi } from "vitest";
 import { Editor } from "../../tui/src/components/editor.ts";
 import { TuiMainScreen } from "../../tui/src/tui-main-screen.ts";
 import { defaultEditorTheme } from "../../tui/test/test-themes.ts";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
+import { BORDER_COLOR_ENV } from "../src/modes/interactive/border-color.ts";
 import { NeovimViewport } from "../src/modes/interactive/components/neovim-viewport.ts";
+import { getInputSessionStatePath, writeInputSessionState } from "../src/modes/interactive/input-session-state.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
 const hasNeovim = spawnSync(process.env.NVIM ?? "nvim", ["--version"], { stdio: "ignore" }).status === 0;
@@ -38,7 +42,31 @@ type InputStateThis = {
 	renderer?: { getFocusedComponent: () => unknown };
 };
 
+type BorderCommandThis = {
+	viewportBorderColor: string | undefined;
+	persistedBorderColor: string | null | undefined;
+	scheduleInputSessionStateSave: () => void;
+	showError: (message: string) => void;
+	renderer?: object;
+};
+type RestoreBorderThis = {
+	startupBorderColor: string | undefined;
+	viewportBorderColor: string | undefined;
+	persistedBorderColor: string | null | undefined;
+	inputPanelMode: "orig" | "nvim" | "both";
+	inputSessionDraft: string;
+	nvimInputMode: "i" | "n";
+	restoringInputState: boolean;
+	inputSessionStatePath: () => string | undefined;
+	sessionManager: { getSessionId: () => string };
+	editor: EditorMock;
+	isInitialized: false;
+	ui: { requestRender: () => void; setFocus: (component: unknown) => void };
+};
+
 const prototype = InteractiveMode.prototype as unknown as {
+	handleBorderCommand(this: BorderCommandThis, text: string): void;
+	restoreInputStateForCurrentSession(this: RestoreBorderThis): void;
 	handleOriginalInputChange(this: InputStateThis, text: string): void;
 	handleNeovimDraftChange(this: InputStateThis, text: string, mode: "i" | "n"): void;
 	submitFromNeovim(this: InputStateThis, text: string): void;
@@ -63,6 +91,82 @@ type ClipboardStateThis = {
 };
 
 describe("InteractiveMode input state", () => {
+	test("restores a saved border override and keeps /border default explicit", () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "pi-border-state-"));
+		const statePath = getInputSessionStatePath(join(tempDir, "session.jsonl"));
+		const previousColor = process.env[BORDER_COLOR_ENV];
+		const context: RestoreBorderThis = {
+			startupBorderColor: "#112233",
+			viewportBorderColor: "#112233",
+			persistedBorderColor: undefined,
+			inputPanelMode: "orig",
+			inputSessionDraft: "",
+			nvimInputMode: "n",
+			restoringInputState: false,
+			inputSessionStatePath: () => statePath,
+			sessionManager: { getSessionId: () => "px-session" },
+			editor: { getText: () => "", setText: vi.fn() },
+			isInitialized: false,
+			ui: { requestRender: vi.fn(), setFocus: vi.fn() },
+		};
+
+		try {
+			writeInputSessionState(statePath, {
+				sessionId: "px-session",
+				draft: "",
+				inputPanelMode: "orig",
+				nvimMode: "n",
+				borderColor: "#A1B2C3",
+			});
+			prototype.restoreInputStateForCurrentSession.call(context);
+			expect(context.viewportBorderColor).toBe("#A1B2C3");
+			expect(process.env[BORDER_COLOR_ENV]).toBe("#A1B2C3");
+
+			writeInputSessionState(statePath, {
+				sessionId: "px-session",
+				draft: "",
+				inputPanelMode: "orig",
+				nvimMode: "n",
+				borderColor: null,
+			});
+			prototype.restoreInputStateForCurrentSession.call(context);
+			expect(context.viewportBorderColor).toBeUndefined();
+			expect(context.persistedBorderColor).toBeNull();
+			expect(process.env[BORDER_COLOR_ENV]).toBeUndefined();
+		} finally {
+			if (previousColor === undefined) delete process.env[BORDER_COLOR_ENV];
+			else process.env[BORDER_COLOR_ENV] = previousColor;
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("persists /border color and explicit theme-default changes", () => {
+		const previousColor = process.env[BORDER_COLOR_ENV];
+		const scheduleSave = vi.fn();
+		const context: BorderCommandThis = {
+			viewportBorderColor: undefined,
+			persistedBorderColor: undefined,
+			scheduleInputSessionStateSave: scheduleSave,
+			showError: vi.fn(),
+		};
+
+		try {
+			prototype.handleBorderCommand.call(context, "/border #12abef");
+			expect(context.viewportBorderColor).toBe("#12ABEF");
+			expect(context.persistedBorderColor).toBe("#12ABEF");
+			expect(process.env[BORDER_COLOR_ENV]).toBe("#12ABEF");
+
+			prototype.handleBorderCommand.call(context, "/border default");
+			expect(context.viewportBorderColor).toBeUndefined();
+			expect(context.persistedBorderColor).toBeNull();
+			expect(process.env[BORDER_COLOR_ENV]).toBeUndefined();
+			expect(scheduleSave).toHaveBeenCalledTimes(2);
+		} finally {
+			if (previousColor === undefined) delete process.env[BORDER_COLOR_ENV];
+			else process.env[BORDER_COLOR_ENV] = previousColor;
+		}
+	});
+
 	test("syncs original-editor changes into Neovim and schedules persistence", () => {
 		const setNvimText = vi.fn();
 		const scheduleSave = vi.fn();

@@ -478,7 +478,9 @@ export class InteractiveMode {
 	private suppressEditorBorders = false;
 	private transcriptScrollView: TuiLayouts.ScrollView | undefined;
 	private fullscreenLayoutRoot: Component | undefined;
-	private viewportBorderColor: string | undefined = readBorderColor(process.env[BORDER_COLOR_ENV]);
+	private readonly startupBorderColor = readBorderColor(process.env[BORDER_COLOR_ENV]);
+	private viewportBorderColor: string | undefined = this.startupBorderColor;
+	private persistedBorderColor: string | null | undefined;
 	private viewportBorderBrightness = readBorderBrightness(process.env[BORDER_BRIGHTNESS_ENV]);
 	private inputPanelMode: InputPanelMode = "orig";
 	private inputSessionDraft = "";
@@ -3412,6 +3414,12 @@ export class InteractiveMode {
 	private restoreInputStateForCurrentSession(): void {
 		const statePath = this.inputSessionStatePath();
 		const state = statePath ? readInputSessionState(statePath, this.sessionManager.getSessionId()) : undefined;
+		this.persistedBorderColor = state?.borderColor;
+		this.viewportBorderColor =
+			state?.borderColor === undefined ? this.startupBorderColor : (state.borderColor ?? undefined);
+		if (this.viewportBorderColor) process.env[BORDER_COLOR_ENV] = this.viewportBorderColor;
+		else delete process.env[BORDER_COLOR_ENV];
+		if (this.renderer instanceof TuiAltScreen) this.applyViewportBorderStyle(this.renderer);
 		this.restoringInputState = true;
 		try {
 			this.inputPanelMode = state?.inputPanelMode ?? "orig";
@@ -3519,7 +3527,14 @@ export class InteractiveMode {
 		this.inputSessionDraft = draft;
 		const hasSessionFile = fs.existsSync(sessionFile);
 		const hasInputState = fs.existsSync(statePath);
-		if (!hasSessionFile && !hasInputState && !draft && this.inputPanelMode === "orig" && this.nvimInputMode === "n") {
+		if (
+			!hasSessionFile &&
+			!hasInputState &&
+			!draft &&
+			this.inputPanelMode === "orig" &&
+			this.nvimInputMode === "n" &&
+			this.persistedBorderColor === undefined
+		) {
 			return;
 		}
 		try {
@@ -3529,6 +3544,7 @@ export class InteractiveMode {
 				draft,
 				inputPanelMode: this.inputPanelMode,
 				nvimMode: this.nvimInputMode,
+				borderColor: this.persistedBorderColor,
 			});
 		} catch (error) {
 			this.handleInputStateError("save", error);
@@ -3566,8 +3582,10 @@ export class InteractiveMode {
 		}
 		if (argument === "default") {
 			this.viewportBorderColor = undefined;
+			this.persistedBorderColor = null;
 			delete process.env[BORDER_COLOR_ENV];
 			if (this.renderer instanceof TuiAltScreen) this.applyViewportBorderStyle(this.renderer);
+			this.scheduleInputSessionStateSave();
 			return;
 		}
 		if (!/^#[\da-f]{6}$/i.test(argument)) {
@@ -3575,8 +3593,10 @@ export class InteractiveMode {
 			return;
 		}
 		this.viewportBorderColor = argument.toUpperCase();
+		this.persistedBorderColor = this.viewportBorderColor;
 		process.env[BORDER_COLOR_ENV] = this.viewportBorderColor;
 		if (this.renderer instanceof TuiAltScreen) this.applyViewportBorderStyle(this.renderer);
+		this.scheduleInputSessionStateSave();
 	}
 
 	private handleStartupSubmit(text: string): void {
