@@ -14,6 +14,30 @@
 
 Pi is a minimal, extensible agent harness that you can make your own.
 
+## Optional `px-harness` integrations
+
+This fork can be paired with [`px-harness`](https://github.com/b-soder/px-harness),
+a separate set of optional integrations:
+
+- Pi extensions and packages: ToolGuard, Questioner, Notifier, QueryHandler,
+  browser/web tools, observational memory, interactive subagents, and the
+  tool-events panel.
+- Shared runtime and skills: approval policy, popup and Messages support, and
+  reusable agent guidance.
+- Optional shell/editor/terminal support: `px` named sessions, a Neovim bridge,
+  and tmux configuration.
+
+The Messages watcher includes a recipient-controlled LaunchAgent helper. Setup
+is opt-in and requires local sender/chat allowlists and macOS Full Disk Access;
+standard Pi installation does not install or enable these integrations. Keep
+`px-harness` in a separate checkout. It is not part of Pi core.
+
+Compatibility is tested against Pi commit
+`a37ceef585b55eb96bdec00b3da875729708ed87`. The [`px-harness` README](https://github.com/b-soder/px-harness/blob/main/README.md)
+covers checkout, build, package dependencies, optional components, and account
+setup. Choose only the integrations you need; some require recipient-local
+settings or credentials.
+
 Adapt Pi to your workflows, not the other way around. Customize Pi with [extensions](packages/coding-agent/docs/extensions.md), [skills](packages/coding-agent/docs/skills.md), [prompt templates](packages/coding-agent/docs/prompt-templates.md), and [themes](packages/coding-agent/docs/themes.md). Bundle them as [Pi packages](packages/coding-agent/docs/packages.md) and share via npm or git.
 
 Pi ships with powerful defaults but skips features like sub-agents and plan mode. Ask Pi to build what you want, or install a package that does it your way.
@@ -52,12 +76,6 @@ pi
 For a built-in AI provider, run `/login` inside Pi to connect a subscription or API key. Then give Pi a task.
 
 See the [documentation](https://pi.dev/docs/latest) for full setup and usage instructions, or [visit pi.dev](https://pi.dev) for demos.
-
-## Optional Pi integrations
-
-[`px-harness`](https://github.com/b-soder/px-harness) is a separate, optional set of Pi extensions, packages, shared runtime, and shell/editor integrations. It is not part of the Pi core and does not change the standard Pi installation above. The current harness compatibility pin is Pi commit `a37ceef585b55eb96bdec00b3da875729708ed87`.
-
-Keep `px-harness` in its own checkout; do not nest it inside the Pi source tree. Its [README](https://github.com/b-soder/px-harness/blob/main/README.md) covers checkout, build, package dependencies, optional components, and account setup. Choose only the integrations you want; they require recipient-local settings and credentials where applicable.
 
 ## Run with Nix
 
