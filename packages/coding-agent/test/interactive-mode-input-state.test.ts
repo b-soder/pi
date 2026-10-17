@@ -14,7 +14,10 @@ import { getInputSessionStatePath, writeInputSessionState } from "../src/modes/i
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
 const hasNeovim = spawnSync(process.env.NVIM ?? "nvim", ["--version"], { stdio: "ignore" }).status === 0;
-const piLuaPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../nvim/.config/nvim/lua/custom/pi.lua");
+const piLuaPath = resolve(
+	dirname(fileURLToPath(import.meta.url)),
+	"../../../../px-harness/nvim/.config/nvim/lua/custom/pi.lua",
+);
 
 type NvimMock = {
 	getText: () => string;

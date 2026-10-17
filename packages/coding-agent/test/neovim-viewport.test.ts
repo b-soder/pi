@@ -18,7 +18,10 @@ class NeovimViewport extends EmbeddedNeovimViewport {
 }
 
 const hasNeovim = spawnSync(process.env.NVIM ?? "nvim", ["--version"], { stdio: "ignore" }).status === 0;
-const piLuaPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../nvim/.config/nvim/lua/custom/pi.lua");
+const piLuaPath = resolve(
+	dirname(fileURLToPath(import.meta.url)),
+	"../../../../px-harness/nvim/.config/nvim/lua/custom/pi.lua",
+);
 
 describe("Neovim viewport", () => {
 	test.skipIf(!hasNeovim)("attaches, renders, syncs drafts, resizes, and flushes through RPC", async () => {
