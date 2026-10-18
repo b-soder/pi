@@ -1,6 +1,4 @@
 import { spawnSync } from "node:child_process";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, test, vi } from "vitest";
 import { CURSOR_MARKER, type TuiMouseEvent } from "../../tui/src/tui.ts";
@@ -18,10 +16,6 @@ class NeovimViewport extends EmbeddedNeovimViewport {
 }
 
 const hasNeovim = spawnSync(process.env.NVIM ?? "nvim", ["--version"], { stdio: "ignore" }).status === 0;
-const piLuaPath = resolve(
-	dirname(fileURLToPath(import.meta.url)),
-	"../../../../px-harness/nvim/.config/nvim/lua/custom/pi.lua",
-);
 
 describe("Neovim viewport", () => {
 	test.skipIf(!hasNeovim)("attaches, renders, syncs drafts, resizes, and flushes through RPC", async () => {
@@ -46,15 +40,7 @@ describe("Neovim viewport", () => {
 					draftChanged = { text, mode };
 				},
 			},
-			[
-				"--embed",
-				"-u",
-				"NONE",
-				"--cmd",
-				"command! PiFlushTest lua local lines = {'live nvim edit'}; vim.api.nvim_buf_set_lines(0, 0, -1, true, lines); vim.rpcnotify(vim.g.pi_channel, 'pi_draft', lines, 'n'); vim.rpcnotify(vim.g.pi_channel, 'pi_submit', lines); vim.api.nvim_buf_set_lines(0, 0, -1, true, {''})",
-				"--cmd",
-				"command! PiQuitTest lua vim.rpcnotify(vim.g.pi_channel, 'pi_quit')",
-			],
+			["--embed", "-u", "NONE"],
 		);
 		viewport.setViewportSize(40, 8);
 		try {
@@ -75,14 +61,15 @@ describe("Neovim viewport", () => {
 			await viWaitFor(async () => expect(await viewport.getMode()).toBe("n"));
 			expect(interrupted).toBe(false);
 			viewport.setViewportSize(48, 14);
-			viewport.handleInput(":PiFlushTest\r");
+			await viewport.replaceBuffer("live nvim edit");
+			viewport.handleInput(":PiFlush\r");
 			viewport.handleInput("i");
 			await viWaitFor(() => expect(submitted).toBe("live nvim edit"));
-			await viWaitFor(() => expect(draftChanged).toEqual({ text: "live nvim edit", mode: "n" }));
+			await viWaitFor(() => expect(draftChanged).toEqual({ text: "", mode: "i" }));
 			expect(await viewport.getBufferLines()).toEqual([""]);
 			expect(await viewport.getMode()).toBe("i");
 			viewport.handleInput("\x1b");
-			viewport.handleInput(":PiQuitTest\r");
+			viewport.handleInput(":PiQuit\r");
 			viewport.handleInput("i");
 			await viWaitFor(() => expect(quit).toBe(true));
 		} finally {
@@ -184,7 +171,7 @@ describe("Neovim viewport", () => {
 		});
 	}
 
-	test.skipIf(!hasNeovim)("reports real Neovim cursor movement through the configured RPC bridge", async () => {
+	test.skipIf(!hasNeovim)("reports real Neovim cursor movement through the bundled RPC bridge", async () => {
 		const tui = new TuiMainScreen(new VirtualTerminal(40, 12));
 		let cursorChanged: { line: number; col: number } | undefined;
 		const viewport = new NeovimViewport(
@@ -198,7 +185,7 @@ describe("Neovim viewport", () => {
 				initialText: "first\nA😀B",
 				initialMode: "i",
 			},
-			["--embed", "-u", "NONE", "--cmd", `lua dofile(${JSON.stringify(piLuaPath)})`],
+			["--embed", "-u", "NONE"],
 		);
 		try {
 			await viewport.ready;
@@ -236,7 +223,7 @@ describe("Neovim viewport", () => {
 		}
 	});
 
-	test.skipIf(!hasNeovim)("reports the final cursor after multiline paste through the Lua bridge", async () => {
+	test.skipIf(!hasNeovim)("reports the final cursor after multiline paste through the bundled bridge", async () => {
 		const tui = new TuiMainScreen(new VirtualTerminal(40, 12));
 		const pastedBlock = "1234567890\n\n1234567890x\n\n1234567890";
 		let draftChanged: string | undefined;
@@ -254,7 +241,7 @@ describe("Neovim viewport", () => {
 				},
 				initialMode: "i",
 			},
-			["--embed", "-u", "NONE", "--cmd", `lua dofile(${JSON.stringify(piLuaPath)})`],
+			["--embed", "-u", "NONE"],
 		);
 		try {
 			await viewport.ready;

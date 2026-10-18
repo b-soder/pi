@@ -1,8 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import { Editor } from "../../tui/src/components/editor.ts";
 import { TuiMainScreen } from "../../tui/src/tui-main-screen.ts";
@@ -14,10 +13,6 @@ import { getInputSessionStatePath, writeInputSessionState } from "../src/modes/i
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
 const hasNeovim = spawnSync(process.env.NVIM ?? "nvim", ["--version"], { stdio: "ignore" }).status === 0;
-const piLuaPath = resolve(
-	dirname(fileURLToPath(import.meta.url)),
-	"../../../../px-harness/nvim/.config/nvim/lua/custom/pi.lua",
-);
 
 type NvimMock = {
 	getText: () => string;
@@ -337,7 +332,7 @@ describe("InteractiveMode input state", () => {
 					onCursorChange: (cursor) => prototype.handleNeovimCursorChange.call(context as any, cursor),
 					initialMode: "i",
 				},
-				["--embed", "-n", "-u", "NONE", "--cmd", `lua dofile(${JSON.stringify(piLuaPath)})`],
+				["--embed", "-n", "-u", "NONE"],
 			);
 			context = Object.assign(Object.create(InteractiveMode.prototype), {
 				inputPanelMode: "orig",

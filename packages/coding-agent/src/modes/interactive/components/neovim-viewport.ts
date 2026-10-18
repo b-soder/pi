@@ -10,6 +10,7 @@ import {
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import { Decoder, encode } from "@msgpack/msgpack";
+import { getBundledInteractiveAssetPath } from "../../../config.ts";
 
 interface Highlight {
 	foreground?: number;
@@ -572,7 +573,11 @@ export class NeovimViewport implements Component, Focusable {
 
 	private start(args: string[]): void {
 		try {
-			this.child = spawn(process.env.NVIM ?? "nvim", args, { stdio: ["pipe", "pipe", "pipe"] });
+			const bridgePath = getBundledInteractiveAssetPath("pi-embedded-nvim.lua");
+			const bridgeCommand = `lua dofile(${JSON.stringify(bridgePath)})`;
+			this.child = spawn(process.env.NVIM ?? "nvim", [...args, "--cmd", bridgeCommand], {
+				stdio: ["pipe", "pipe", "pipe"],
+			});
 		} catch (error) {
 			this.fail(error);
 			return;

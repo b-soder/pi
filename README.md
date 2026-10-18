@@ -14,29 +14,36 @@
 
 Pi is a minimal, extensible agent harness that you can make your own.
 
-## Optional `px-harness` integrations
+## `devenv` branch
 
-This fork can be paired with [`px-harness`](https://github.com/b-soder/px-harness),
-a separate set of optional integrations:
+The `devenv` branch is a standalone Pi fork. Its branch-specific changes are in
+Pi itself; no separate harness checkout is required. They include:
 
-- Pi extensions and packages: ToolGuard, Questioner, Notifier, QueryHandler,
-  browser/web tools, observational memory, interactive subagents, and the
-  tool-events panel.
-- Shared runtime and skills: approval policy, popup and Messages support, and
-  reusable agent guidance.
-- Optional shell/editor/terminal support: `px` named sessions, a Neovim bridge,
-  and tmux configuration.
+- An experimental, resizable fullscreen four-panel layout and embedded Neovim
+  input panel,
+  with synchronized drafts, cursor/mode state, multiline paste, and wrapped-text
+  selection. The Neovim RPC bridge ships with the coding-agent package.
+- Per-session border colors, inherited styling for subagents, and improved
+  session-picker defaults.
+- Model names and queued steering text in the interactive UI, plus expanded
+  multiline-paste handling and tmux Meta-Enter support.
 
-The Messages watcher includes a recipient-controlled LaunchAgent helper. Setup
-is opt-in and requires local sender/chat allowlists and macOS Full Disk Access;
-standard Pi installation does not install or enable these integrations. Keep
-`px-harness` in a separate checkout. It is not part of Pi core.
+To install this branch from source, use Node.js 22.19 or newer:
 
-Compatibility is tested against Pi commit
-`a37ceef585b55eb96bdec00b3da875729708ed87`. The [`px-harness` README](https://github.com/b-soder/px-harness/blob/main/README.md)
-covers checkout, build, package dependencies, optional components, and account
-setup. Choose only the integrations you need; some require recipient-local
-settings or credentials.
+```bash
+git clone --branch devenv --single-branch git@github.com:b-soder/pi.git ~/src/pi-devenv
+cd ~/src/pi-devenv
+npm ci --ignore-scripts
+npm run build
+cd packages/coding-agent
+npm link
+```
+
+`npm run build` refreshes model data and may need network access. `npm link`
+connects the global `pi` command to this checkout; update the checkout and
+rebuild to pick up later branch changes. The embedded Neovim panel additionally
+requires the `nvim` executable. Installing the Pi branch does not install any
+optional extensions or recipient-specific configuration.
 
 Adapt Pi to your workflows, not the other way around. Customize Pi with [extensions](packages/coding-agent/docs/extensions.md), [skills](packages/coding-agent/docs/skills.md), [prompt templates](packages/coding-agent/docs/prompt-templates.md), and [themes](packages/coding-agent/docs/themes.md). Bundle them as [Pi packages](packages/coding-agent/docs/packages.md) and share via npm or git.
 
