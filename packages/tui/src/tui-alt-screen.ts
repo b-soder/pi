@@ -745,6 +745,15 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 
 		const keybindings = getKeybindings();
 		const isRelease = isKeyRelease(data);
+		// Selection ranges are screen-relative, so discard them before keyboard input moves content.
+		if (
+			(this.selectionAnchor || this.selectionFocus || this.selectionPressActive) &&
+			!isRelease &&
+			!keybindings.matches(data, "tui.input.copy")
+		) {
+			this.clearTextSelection();
+			this.requestRender();
+		}
 		if (keybindings.matches(data, "tui.altScreen.search")) {
 			if (!isRelease) this.toggleSearch();
 			return { consume: true };

@@ -7,6 +7,7 @@ import {
 	sliceByColumn,
 	type TUI,
 	type TuiMouseEvent,
+	type TuiMouseEventResult,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import { Decoder, encode } from "@msgpack/msgpack";
@@ -229,6 +230,9 @@ export class NeovimViewport implements Component, Focusable {
 	private readonly initialText: string;
 	private readonly initialMode: "i" | "n";
 	private bufferUpdate: Promise<void> = Promise.resolve();
+	private pendingBufferText: string | undefined;
+	private pendingCursorPosition: BufferCursorPosition | undefined;
+	private bufferSyncScheduled = false;
 	private resizeUpdate: Promise<void> = Promise.resolve();
 	private resizePending = false;
 	private resizeGeneration = 0;
@@ -367,6 +371,7 @@ export class NeovimViewport implements Component, Focusable {
 
 	async getBufferLines(): Promise<string[]> {
 		await this.ready;
+		await this.bufferUpdate;
 		const lines = await this.request("nvim_buf_get_lines", [0, 0, -1, true]);
 		if (!Array.isArray(lines) || !lines.every((line) => typeof line === "string")) {
 			throw new Error("Neovim returned invalid buffer lines");
@@ -383,6 +388,7 @@ export class NeovimViewport implements Component, Focusable {
 
 	async getCursorPosition(): Promise<BufferCursorPosition> {
 		await this.ready;
+		await this.bufferUpdate;
 		const cursor = await this.request("nvim_win_get_cursor", [0]);
 		if (!Array.isArray(cursor) || typeof cursor[0] !== "number" || typeof cursor[1] !== "number") {
 			throw new Error("Neovim returned an invalid cursor position");
@@ -393,14 +399,8 @@ export class NeovimViewport implements Component, Focusable {
 	}
 
 	async setCursorPosition(position: BufferCursorPosition): Promise<void> {
-		await this.ready;
-		await this.bufferUpdate;
-		const lines = this.text.split("\n");
-		const line = Math.max(0, Math.min(lines.length - 1, Math.floor(position.line)));
-		const text = lines[line] ?? "";
-		const column = Math.max(0, Math.min(text.length, Math.floor(position.col)));
-		const byteColumn = Buffer.byteLength(text.slice(0, column), "utf8");
-		await this.request("nvim_win_set_cursor", [0, [line + 1, byteColumn]]);
+		this.pendingCursorPosition = { ...position };
+		await this.scheduleBufferSync();
 	}
 
 	setText(text: string): void {
@@ -408,21 +408,55 @@ export class NeovimViewport implements Component, Focusable {
 	}
 
 	async replaceBuffer(text: string): Promise<void> {
+		// Only the newest pending mirror snapshot matters while Neovim is processing a write.
 		this.text = text;
+		this.pendingBufferText = text;
+		await this.scheduleBufferSync();
+	}
+
+	private scheduleBufferSync(): Promise<void> {
+		if (this.bufferSyncScheduled) return this.bufferUpdate;
+		this.bufferSyncScheduled = true;
 		const update = this.bufferUpdate.then(async () => {
 			await this.ready;
-			await this.request("nvim_buf_set_lines", [0, 0, -1, true, text.split("\n")]);
+			while (this.pendingBufferText !== undefined || this.pendingCursorPosition !== undefined) {
+				if (this.pendingBufferText !== undefined) {
+					const text = this.pendingBufferText;
+					this.pendingBufferText = undefined;
+					await this.request("nvim_buf_set_lines", [0, 0, -1, true, text.split("\n")]);
+					continue;
+				}
+				const position = this.pendingCursorPosition;
+				this.pendingCursorPosition = undefined;
+				if (!position) continue;
+				const lines = this.text.split("\n");
+				const line = Math.max(0, Math.min(lines.length - 1, Math.floor(position.line)));
+				const text = lines[line] ?? "";
+				const column = Math.max(0, Math.min(text.length, Math.floor(position.col)));
+				const byteColumn = Buffer.byteLength(text.slice(0, column), "utf8");
+				await this.request("nvim_win_set_cursor", [0, [line + 1, byteColumn]]);
+			}
 		});
 		this.bufferUpdate = update;
-		await update;
+		void update.then(
+			() => {
+				this.bufferSyncScheduled = false;
+				if (this.pendingBufferText !== undefined || this.pendingCursorPosition !== undefined) {
+					void this.scheduleBufferSync().catch((error: unknown) => this.fail(error));
+				}
+			},
+			() => {
+				this.bufferSyncScheduled = false;
+				this.pendingBufferText = undefined;
+				this.pendingCursorPosition = undefined;
+			},
+		);
+		return update;
 	}
 
 	async restoreState(text: string, mode: "i" | "n"): Promise<void> {
 		await this.ready;
-		if (this.text !== text) {
-			this.text = text;
-			await this.request("nvim_buf_set_lines", [0, 0, -1, true, text.split("\n")]);
-		}
+		if (this.text !== text) await this.replaceBuffer(text);
 		const actualMode = await this.getMode();
 		if (mode === "i" && !actualMode.startsWith("i")) await this.request("nvim_input", ["i"]);
 		else if (mode === "n" && actualMode.startsWith("i")) await this.request("nvim_input", ["\x1b"]);
@@ -455,9 +489,21 @@ export class NeovimViewport implements Component, Focusable {
 		this.request("nvim_input", [toNeovimKey(data)]).catch((error: unknown) => this.fail(error));
 	}
 
-	handleMouse(_event: TuiMouseEvent): undefined {
-		// Let the outer fullscreen TUI handle selection; Neovim mouse input moves its cursor.
-		return undefined;
+	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+		// Preserve TUI-owned clicks and copy selection; only route wheel input to Neovim.
+		if (event.type !== "wheel" || !this.child || !this.attached) return undefined;
+		if ("resetTextSelection" in this.tui && typeof this.tui.resetTextSelection === "function") {
+			this.tui.resetTextSelection();
+			this.tui.requestRender();
+		}
+		if (event.wheelDelta) {
+			const modifiers = `${event.shift ? "S" : ""}${event.ctrl ? "C" : ""}${event.alt ? "A" : ""}`;
+			const action = event.wheelDelta < 0 ? "up" : "down";
+			this.request("nvim_input_mouse", ["wheel", action, modifiers, 1, event.y, event.x]).catch((error: unknown) =>
+				this.fail(error),
+			);
+		}
+		return { handled: true, render: false };
 	}
 
 	render(width: number): string[] {
@@ -606,6 +652,7 @@ export class NeovimViewport implements Component, Focusable {
 			.then(() => this.request("nvim_set_option_value", ["cmdheight", 1, { scope: "global" }]))
 			// Keep insertion at EOL without a Normal-mode virtual column that leaves `x` past the new EOL.
 			.then(() => this.request("nvim_set_option_value", ["virtualedit", "insert", { scope: "global" }]))
+			.then(() => this.request("nvim_set_option_value", ["mouse", "a", { scope: "global" }]))
 			.then(() =>
 				this.request("nvim_ui_attach", [
 					this.width,

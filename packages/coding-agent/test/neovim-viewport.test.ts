@@ -78,7 +78,7 @@ describe("Neovim viewport", () => {
 	});
 
 	test.skipIf(!hasNeovim)(
-		"leaves mouse events to the fullscreen TUI instead of forwarding them to Neovim",
+		"forwards wheel events to Neovim while leaving selection gestures to the fullscreen TUI",
 		async () => {
 			const tui = new TuiMainScreen(new VirtualTerminal(40, 12));
 			const viewport = new NeovimViewport(tui, { onSubmit: () => {}, onQuit: () => {} }, ["--embed", "-u", "NONE"]);
@@ -102,16 +102,137 @@ describe("Neovim viewport", () => {
 					{ ...base, type: "release", button: "left" },
 					{ ...base, type: "click", button: "left", clickCount: 1 },
 					{ ...base, type: "wheel", button: "none", wheelDelta: -1 },
+					{ ...base, x: 4, y: 5, shift: true, alt: true, type: "wheel", button: "none", wheelDelta: 1 },
 					{ ...base, type: "move", button: "none" },
 				];
 
-				for (const event of events) expect(viewport.handleMouse(event)).toBeUndefined();
-				expect(request.mock.calls.filter(([method]) => method === "nvim_input_mouse")).toEqual([]);
+				for (const event of events) {
+					const result = viewport.handleMouse(event);
+					if (event.type === "wheel") expect(result?.handled).toBe(true);
+					else expect(result).toBeUndefined();
+				}
+				await viWaitFor(() =>
+					expect(
+						request.mock.calls.filter(([method]) => method === "nvim_input_mouse").map(([, args]) => args),
+					).toEqual([
+						["wheel", "up", "", 1, 2, 2],
+						["wheel", "down", "SA", 1, 5, 4],
+					]),
+				);
 			} finally {
 				viewport.dispose();
 			}
 		},
 	);
+
+	test.skipIf(!hasNeovim)("scrolls the embedded buffer on wheel input and clears the screen selection", async () => {
+		const terminal = new VirtualTerminal(20, 10);
+		const tui = new TuiAltScreen(terminal, undefined, undefined, { copyOnSelect: false });
+		const viewport = new NeovimViewport(tui, { onSubmit: () => {}, onQuit: () => {} }, ["--embed", "-u", "NONE"]);
+		viewport.setViewportSize(20, 4);
+		tui.setLayoutRoot(viewport);
+		tui.setFocus(viewport);
+		try {
+			await viewport.ready;
+			await viewport.replaceBuffer(Array.from({ length: 30 }, (_, index) => `line-${index + 1}`).join("\n"));
+			await viewport.setCursorPosition({ line: 29, col: 0 });
+			tui.start();
+			await terminal.waitForRender();
+
+			const getTopLine = async () => Number(await (viewport as any).request("nvim_eval", ["winsaveview().topline"]));
+			const topBeforeScroll = await getTopLine();
+			expect(topBeforeScroll).toBeGreaterThan(1);
+
+			terminal.sendInput("\x1b[<0;1;1M");
+			terminal.sendInput("\x1b[<32;4;2M");
+			terminal.sendInput("\x1b[<0;4;2m");
+			await terminal.waitForRender();
+			expect(tui.hasActiveSelection()).toBe(true);
+
+			terminal.sendInput("\x1b[<64;2;1M");
+			await viWaitFor(async () => {
+				expect((viewport as any).error).toBeUndefined();
+				expect(await getTopLine()).toBeLessThan(topBeforeScroll);
+			});
+			expect(tui.hasActiveSelection()).toBe(false);
+		} finally {
+			tui.stop();
+			viewport.dispose();
+		}
+	});
+
+	test.skipIf(!hasNeovim)("clears the fullscreen copy selection when Enter edits the Neovim buffer", async () => {
+		const terminal = new VirtualTerminal(20, 10);
+		const tui = new TuiAltScreen(terminal, undefined, undefined, { copyOnSelect: false });
+		const viewport = new NeovimViewport(tui, { onSubmit: () => {}, onQuit: () => {}, initialMode: "i" }, [
+			"--embed",
+			"-u",
+			"NONE",
+		]);
+		viewport.setViewportSize(20, 4);
+		tui.setLayoutRoot(viewport);
+		tui.setFocus(viewport);
+		try {
+			await viewport.ready;
+			await viewport.replaceBuffer("alpha\nbeta");
+			tui.start();
+			await terminal.waitForRender();
+
+			terminal.sendInput("\x1b[<0;1;1M");
+			terminal.sendInput("\x1b[<32;4;2M");
+			terminal.sendInput("\x1b[<0;4;2m");
+			await terminal.waitForRender();
+			expect(tui.hasActiveSelection()).toBe(true);
+
+			terminal.sendInput("\r");
+			await viWaitFor(async () => expect((await viewport.getBufferLines()).length).toBe(3));
+			expect(tui.hasActiveSelection()).toBe(false);
+		} finally {
+			tui.stop();
+			viewport.dispose();
+		}
+	});
+
+	test.skipIf(!hasNeovim)("coalesces queued buffer and cursor mirror updates to the latest state", async () => {
+		const tui = new TuiMainScreen(new VirtualTerminal(40, 12));
+		const viewport = new NeovimViewport(tui, { onSubmit: () => {}, onQuit: () => {} }, ["--embed", "-u", "NONE"]);
+		try {
+			await viewport.ready;
+			const requestTarget = viewport as unknown as {
+				request: (method: string, args: unknown[]) => Promise<unknown>;
+			};
+			const request = vi.spyOn(requestTarget, "request");
+			const bufferWrites: unknown[][] = [];
+			const cursorWrites: unknown[][] = [];
+			let releaseFirstWrite!: (value: unknown) => void;
+			request.mockImplementation((method: string, args: unknown[]) => {
+				if (method === "nvim_buf_set_lines") {
+					bufferWrites.push(args);
+					if (bufferWrites.length === 1) {
+						return new Promise((resolve) => {
+							releaseFirstWrite = resolve;
+						});
+					}
+				}
+				if (method === "nvim_win_set_cursor") cursorWrites.push(args);
+				return Promise.resolve(undefined);
+			});
+
+			const firstWrite = viewport.replaceBuffer("first");
+			await viWaitFor(() => expect(bufferWrites).toHaveLength(1));
+			const secondWrite = viewport.replaceBuffer("stale");
+			const latestWrite = viewport.replaceBuffer("latest");
+			const firstCursor = viewport.setCursorPosition({ line: 0, col: 1 });
+			const latestCursor = viewport.setCursorPosition({ line: 0, col: 3 });
+			releaseFirstWrite(undefined);
+			await Promise.all([firstWrite, secondWrite, latestWrite, firstCursor, latestCursor]);
+
+			expect(bufferWrites.map((args) => args[4])).toEqual([["first"], ["latest"]]);
+			expect(cursorWrites).toEqual([[0, [1, 3]]]);
+		} finally {
+			viewport.dispose();
+		}
+	});
 
 	test.skipIf(!hasNeovim)("pastes bracketed text intact in insert and append modes", async () => {
 		const tui = new TuiMainScreen(new VirtualTerminal(80, 12));

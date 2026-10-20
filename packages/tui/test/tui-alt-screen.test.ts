@@ -1609,6 +1609,38 @@ describe("TuiAltScreen", () => {
 		tui.stop();
 	});
 
+	it("clears a completed text selection on editor input but preserves the copy binding", async () => {
+		const terminal = new VirtualTerminal(20, 4);
+		const tui = new TuiAltScreen(terminal);
+		const input = new InputOverlay();
+		tui.addChild(new Text("alpha\nbeta\ngamma\ndelta", 0, 0));
+		tui.setFocus(input);
+		tui.start();
+		await terminal.waitForRender();
+
+		terminal.sendInput("\x1b[<0;1;1M");
+		terminal.sendInput("\x1b[<32;4;2M");
+		terminal.sendInput("\x1b[<0;4;2m");
+		await terminal.waitForRender();
+		assert.strictEqual(tui.hasActiveSelection(), true);
+
+		terminal.sendInput("\r");
+		await terminal.waitForRender();
+		assert.strictEqual(tui.hasActiveSelection(), false);
+		assert.deepStrictEqual(input.inputs, ["\r"]);
+
+		terminal.sendInput("\x1b[<0;1;1M");
+		terminal.sendInput("\x1b[<32;4;2M");
+		terminal.sendInput("\x1b[<0;4;2m");
+		await terminal.waitForRender();
+		terminal.sendInput("\x03");
+		await terminal.waitForRender();
+		assert.strictEqual(tui.hasActiveSelection(), true);
+		assert.deepStrictEqual(input.inputs, ["\r", "\x03"]);
+
+		tui.stop();
+	});
+
 	it("copies an active selection programmatically", async () => {
 		const terminal = new RecordingTerminal(20, 4);
 		const copied: string[] = [];
