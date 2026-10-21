@@ -326,6 +326,35 @@ describe("Neovim viewport", () => {
 		}
 	});
 
+	test.skipIf(!hasNeovim)("clamps Insert-mode vertical movement to target line content", async () => {
+		const tui = new TuiMainScreen(new VirtualTerminal(40, 12));
+		const viewport = new NeovimViewport(
+			tui,
+			{ onSubmit: () => {}, onQuit: () => {}, initialText: "oooooo\nooo\n", initialMode: "i" },
+			["--embed", "-u", "NONE"],
+		);
+		try {
+			await viewport.ready;
+			await viewport.setCursorPosition({ line: 0, col: 6 });
+			viewport.handleInput("\x1b[B");
+			await viWaitFor(async () => expect(await viewport.getCursorPosition()).toEqual({ line: 1, col: 3 }));
+
+			viewport.handleInput("\x1b[B");
+			await viWaitFor(async () => expect(await viewport.getCursorPosition()).toEqual({ line: 2, col: 0 }));
+			viewport.handleInput("\x1b[A");
+			await viWaitFor(async () => expect(await viewport.getCursorPosition()).toEqual({ line: 1, col: 3 }));
+
+			viewport.handleInput("\x1b[B");
+			for (let index = 0; index < 4; index++) viewport.handleInput("\x1b[C");
+			await viWaitFor(async () => expect(await viewport.getCursorPosition()).toEqual({ line: 2, col: 0 }));
+			viewport.handleInput("o");
+			await viWaitFor(async () => expect(await viewport.getBufferLines()).toEqual(["oooooo", "ooo", "o"]));
+			expect(await viewport.getCursorPosition()).toEqual({ line: 2, col: 1 });
+		} finally {
+			viewport.dispose();
+		}
+	});
+
 	test.skipIf(!hasNeovim)("keeps the linegrid cursor on the final row after multiline paste", async () => {
 		const tui = new TuiMainScreen(new VirtualTerminal(40, 12));
 		const pastedBlock = "1234567890\n\n1234567890x\n\n1234567890";

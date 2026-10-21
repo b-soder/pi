@@ -650,8 +650,8 @@ export class NeovimViewport implements Component, Focusable {
 			})
 			.then(() => this.request("nvim_set_option_value", ["laststatus", 0, { scope: "global" }]))
 			.then(() => this.request("nvim_set_option_value", ["cmdheight", 1, { scope: "global" }]))
-			// Keep insertion at EOL without a Normal-mode virtual column that leaves `x` past the new EOL.
-			.then(() => this.request("nvim_set_option_value", ["virtualedit", "insert", { scope: "global" }]))
+			// Match regular Neovim: Insert-mode vertical movement clamps to the target line's content.
+			.then(() => this.request("nvim_set_option_value", ["virtualedit", "", { scope: "global" }]))
 			.then(() => this.request("nvim_set_option_value", ["mouse", "a", { scope: "global" }]))
 			.then(() =>
 				this.request("nvim_ui_attach", [
