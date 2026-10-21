@@ -69,6 +69,9 @@ describe("Neovim viewport", () => {
 			expect(await viewport.getBufferLines()).toEqual([""]);
 			expect(await viewport.getMode()).toBe("i");
 			viewport.handleInput("\x1b");
+			viewport.handleInput("/cl\r");
+			await viWaitFor(() => expect(submitted).toBe("/cl"));
+			await viWaitFor(async () => expect(await viewport.getBufferLines()).toEqual([""]));
 			viewport.handleInput(":PiQuit\r");
 			viewport.handleInput("i");
 			await viWaitFor(() => expect(quit).toBe(true));

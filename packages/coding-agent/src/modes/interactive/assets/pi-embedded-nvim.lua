@@ -71,6 +71,17 @@ vim.api.nvim_create_user_command("PiFlush", function()
   pi_sync_draft()
 end, { force = true })
 
+vim.api.nvim_create_user_command("PiClear", function()
+  local channel = pi_channel()
+  if not channel then return end
+  local draft = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, true), "\n")
+  if draft:match("%S") then
+    vim.notify("PiClear requires an empty input buffer; submit or save your draft first.", vim.log.levels.WARN)
+    return
+  end
+  vim.rpcnotify(channel, "pi_submit", { "/cl" })
+end, { force = true, desc = "Clear Pi output panels" })
+
 local function pi_flush_from_insert()
   vim.cmd.stopinsert()
   vim.cmd.PiFlush()
@@ -115,6 +126,9 @@ end, { force = true })
 
 vim.keymap.set("c", "<CR>", function()
   local command = vim.fn.getcmdline()
+  if vim.fn.getcmdtype() == "/" and command:match("^%s*cl%s*$") and type(vim.g.pi_channel) == "number" then
+    return "<C-c><Cmd>PiClear<CR>"
+  end
   if command:match("^%s*q!?%s*$") and type(vim.g.pi_channel) == "number" then
     return "<C-c><Cmd>PiQuit<CR>"
   end

@@ -3721,6 +3721,11 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/cl") {
+				this.editor.setText("");
+				this.handleClearOutputCommand();
+				return;
+			}
 			if (text === "/new") {
 				this.editor.setText("");
 				await this.handleClearCommand();
@@ -7414,6 +7419,16 @@ export class InteractiveMode {
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Markdown(hotkeys.trim(), 1, 1, this.getMarkdownThemeWithSettings()));
 		this.chatContainer.addChild(new DynamicBorder());
+		this.ui.requestRender();
+	}
+
+	private handleClearOutputCommand(): void {
+		if (this.session.isStreaming || this.session.isCompacting || this.session.isBashRunning) {
+			this.showError("Wait for the current operation to finish before clearing output panels.");
+			return;
+		}
+		this.chatContainer.clear();
+		this.toolOutputContainer.clear();
 		this.ui.requestRender();
 	}
 
