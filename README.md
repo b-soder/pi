@@ -16,17 +16,54 @@ Pi is a minimal, extensible agent harness that you can make your own.
 
 ## `devenv` branch
 
-The `devenv` branch is a standalone Pi fork. Its branch-specific changes are in
-Pi itself; no separate harness checkout is required. They include:
+The `devenv` branch is a private Pi fork based on upstream Pi 1.3.0. Its
+changes live in the Pi monorepo, so this branch builds and runs without a
+separate `px-harness` checkout. The work focuses on a more flexible fullscreen
+terminal workflow, integrated Neovim input, and clearer session state.
 
-- An experimental, resizable fullscreen four-panel layout and embedded Neovim
-  input panel,
-  with synchronized drafts, cursor/mode state, multiline paste, and wrapped-text
-  selection. The Neovim RPC bridge ships with the coding-agent package.
-- Per-session border colors, inherited styling for subagents, and improved
-  session-picker defaults.
-- Model names and queued steering text in the interactive UI, plus expanded
-  multiline-paste handling and tmux Meta-Enter support.
+### Resizable fullscreen layout
+
+The opt-in `experimentalTuiLayout: "four-panel"` setting adds four stacked
+regions to fullscreen mode: tool output, the assistant conversation, input, and
+status. Dividers let the user adjust the available space; the standard layout
+remains available. The input region can show Pi's original editor, the embedded
+Neovim viewport, or both. Fullscreen selection and scrolling also account for
+wrapped text and mouse-wheel input. The layout setting and input controls are
+described in the [settings reference](packages/coding-agent/docs/settings.md#terminal-and-display).
+
+### Embedded Neovim input
+
+The coding-agent package contains its own Neovim RPC bridge; using this input
+requires the `nvim` executable, but not an external Pi Neovim module or a
+`px-harness` checkout. `/input` selects the original editor, Neovim, or both;
+`⌘-/` changes the visible input panels and focus. Drafts synchronize between
+editors, and persisted sessions retain input text, cursor/mode state, and panel
+visibility. The bridge handles paste and wrapped-line editing/copying while
+submitting through Pi's normal input path. Neovim input details and limitations
+are also described in the [settings reference](packages/coding-agent/docs/settings.md#terminal-and-display).
+
+### Session and model presentation
+
+Model selectors and the footer prefer a provider's human-readable model name,
+falling back to its ID when no name is available; configuration still uses the
+model ID. `/border` sets a per-session fullscreen frame color, which is saved
+with the session and inherited by child sessions. The `pi -r` picker starts
+with named sessions, while `/resume` continues to show all sessions by default;
+see [session docs](packages/coding-agent/docs/sessions.md) for picker behavior.
+Queued steering messages are also visible in the interactive UI.
+
+### Input and output controls
+
+The fork raises the size/line threshold at which a large multiline paste is
+converted to an attachment. `super+escape` interrupts from either fullscreen
+input. In a tmux-hosted Neovim panel, Meta-Enter submits the draft to Pi when
+connected and keeps normal Neovim behavior when it is not. `/cl` clears the
+visible conversation and tool-output panels without deleting session history;
+it refuses while Pi is streaming, compacting, or running Bash. In embedded
+Neovim, `:PiClear` submits `/cl` only when the input buffer is empty; its `/cl`
+command-line mapping is active only while connected to Pi. The settings UI also
+lets users acknowledge the tmux extended-key warning without editing tmux
+configuration.
 
 To install this branch from source, use Node.js 22.19 or newer:
 
