@@ -18,7 +18,7 @@ Pi is a minimal, extensible agent harness that you can make your own.
 
 The `devenv` branch is a private Pi fork based on upstream Pi 1.3.0. Its
 changes live in the Pi monorepo, so this branch builds and runs without a
-separate `px-harness` checkout. The work focuses on a more flexible fullscreen
+separate `px` checkout. The work focuses on a more flexible fullscreen
 terminal workflow, integrated Neovim input, and clearer session state.
 
 ### Resizable fullscreen layout
@@ -35,7 +35,7 @@ described in the [settings reference](packages/coding-agent/docs/settings.md#ter
 
 The coding-agent package contains its own Neovim RPC bridge; using this input
 requires the `nvim` executable, but not an external Pi Neovim module or a
-`px-harness` checkout. `/input` selects the original editor, Neovim, or both;
+`px` checkout. `/input` selects the original editor, Neovim, or both;
 `⌘-/` changes the visible input panels and focus. Drafts synchronize between
 editors, and persisted sessions retain input text, cursor/mode state, and panel
 visibility. The bridge handles paste and wrapped-line editing/copying while
