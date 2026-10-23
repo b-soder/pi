@@ -1763,7 +1763,7 @@ describe("openai-completions tool_choice", () => {
 	// TODO: Restore when the main branch fixes the OpenRouter model ID.
 	/*
 	it("uses OpenRouter reasoning object instead of reasoning_effort", async () => {
-		const model = getModel("openrouter", "deepseek/deepseek-r1")!;
+		const model = getModel("openrouter", "deepseek/deepseek-r1-0528")!;
 		let payload: unknown;
 
 		await streamSimple(

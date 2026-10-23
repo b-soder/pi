@@ -16,7 +16,7 @@ Pi is a minimal, extensible agent harness that you can make your own.
 
 ## `devenv` branch
 
-The `devenv` branch is a private Pi fork based on upstream Pi 1.3.0. Its
+The `devenv` branch is a private Pi fork based on upstream Pi 1.4.0. Its
 changes live in the Pi monorepo, so this branch builds and runs without a
 separate `px` checkout. The work focuses on a more flexible fullscreen
 terminal workflow, integrated Neovim input, and clearer session state.

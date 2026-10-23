@@ -603,6 +603,10 @@
         "anthropicExtraUsage": {
           "type": "boolean",
           "default": true
+        },
+        "tmuxExtendedKeysFormat": {
+          "type": "boolean",
+          "default": true
         }
       }
     },
@@ -695,6 +699,20 @@
         }
       ],
       "default": "fullscreen"
+    },
+    "experimentalTuiLayout": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "standard"
+        },
+        {
+          "type": "string",
+          "const": "four-panel"
+        }
+      ],
+      "description": "Experimental fullscreen layout.",
+      "default": "standard"
     },
     "fullscreenExitOutput": {
       "anyOf": [

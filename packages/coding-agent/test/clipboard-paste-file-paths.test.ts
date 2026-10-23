@@ -31,6 +31,7 @@ test("Finder file paths take precedence over their icon image", async () => {
 	const insertTextAtCursor = vi.fn<(text: string) => void>();
 	const context = {
 		editor: { insertTextAtCursor },
+		insertClipboardTextAtCursor: insertTextAtCursor,
 		showError: vi.fn(),
 		ui: { requestRender: vi.fn() },
 	};
@@ -98,6 +99,7 @@ test.each([
 			getText: () => editorText,
 			insertTextAtCursor,
 		},
+		insertClipboardTextAtCursor: insertTextAtCursor,
 		showError: vi.fn(),
 		ui: { requestRender: vi.fn() },
 	};
@@ -124,6 +126,7 @@ test("bash mode shell-quotes file paths and inserts them as arguments", async ()
 			getText: () => "catDEST",
 			insertTextAtCursor,
 		},
+		insertClipboardTextAtCursor: insertTextAtCursor,
 		isBashMode: true,
 		showError: vi.fn(),
 		ui: { requestRender: vi.fn() },

@@ -199,6 +199,10 @@
       "$ref": "#/$defs/KeybindingValue",
       "description": "Cancel or abort"
     },
+    "app.input.interrupt": {
+      "$ref": "#/$defs/KeybindingValue",
+      "description": "Interrupt Pi from either input panel"
+    },
     "app.clear": {
       "$ref": "#/$defs/KeybindingValue",
       "description": "Clear editor"
@@ -230,6 +234,10 @@
     "app.model.select": {
       "$ref": "#/$defs/KeybindingValue",
       "description": "Open model selector"
+    },
+    "app.input.toggle": {
+      "$ref": "#/$defs/KeybindingValue",
+      "description": "Toggle fullscreen input panel"
     },
     "app.tools.expand": {
       "$ref": "#/$defs/KeybindingValue",
