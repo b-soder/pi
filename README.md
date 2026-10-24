@@ -16,56 +16,104 @@ Pi is a minimal, extensible agent harness that you can make your own.
 
 ## `devenv` branch
 
-The `devenv` branch is a private Pi fork based on upstream Pi 1.4.0. Its
-changes live in the Pi monorepo, so this branch builds and runs without a
-separate `px` checkout. The work focuses on a more flexible fullscreen
-terminal workflow, integrated Neovim input, and clearer session state.
+The `devenv` branch is a standalone Pi 1.4.0 fork focused on a resizable fullscreen workflow,
+embedded Neovim input, and clearer session/model presentation. Its changes live in Pi itself:
+build and run it without `px`, tmux, ToolGuard, or other companion extensions. The entries
+below describe **fork-specific behavior**, not claims that vanilla Pi lacks ordinary editing,
+sessions, or models; the generic Getting started section further down installs upstream Pi, not
+this branch. Optional `px` integrations such as Pair, subagents, browser tools, and Interaction
+Tools are separate installations.
 
-### Resizable fullscreen layout
+### Tool Index
 
-The opt-in `experimentalTuiLayout: "four-panel"` setting adds four stacked
-regions to fullscreen mode: tool output, the assistant conversation, input, and
-status. Dividers let the user adjust the available space; the standard layout
-remains available. The input region can show Pi's original editor, the embedded
-Neovim viewport, or both. Fullscreen selection and scrolling also account for
-wrapped text and mouse-wheel input. The layout setting and input controls are
-described in the [settings reference](packages/coding-agent/docs/settings.md#terminal-and-display).
+#### Four-panel fullscreen layout
 
-### Embedded Neovim input
+- **Summary:** Resize separate tool-output, conversation, input, and status regions.
+- **Works with:** This `devenv` fork in fullscreen mode; the `four-panel` variant is not
+  supplied by the pinned vanilla Pi host or VS Code Copilot.
+- **Requires:** The built fork and `experimentalTuiLayout: "four-panel"` in Pi settings,
+  followed by a Pi restart. No `px`, tmux, or Neovim is required to use the original input
+  panel.
 
-The coding-agent package contains its own Neovim RPC bridge; using this input
-requires the `nvim` executable, but not an external Pi Neovim module or a
-`px` checkout. `/input` selects the original editor, Neovim, or both;
-`⌘-/` changes the visible input panels and focus. Drafts synchronize between
-editors, and persisted sessions retain input text, cursor/mode state, and panel
-visibility. The bridge handles paste and wrapped-line editing/copying while
-submitting through Pi's normal input path. Neovim input details and limitations
-are also described in the [settings reference](packages/coding-agent/docs/settings.md#terminal-and-display).
+The standard layout remains the default. In four-panel mode, dividers allocate space between the
+regions, and the input region can show the original editor, Neovim, or both. Wrapped transcript
+text, mouse selection, and wheel scrolling remain usable within the fullscreen viewport.
+**Setup:** [configure the layout](#configure-four-panel-fullscreen).
 
-### Session and model presentation
+#### Embedded Neovim input
 
-Model selectors and the footer prefer a provider's human-readable model name,
-falling back to its ID when no name is available; configuration still uses the
-model ID. `/border` sets a per-session fullscreen frame color, which is saved
-with the session and inherited by child sessions. The `pi -r` picker starts
-with named sessions, while `/resume` continues to show all sessions by default;
-see [session docs](packages/coding-agent/docs/sessions.md) for picker behavior.
-Queued steering messages are also visible in the interactive UI.
+- **Summary:** Edit Pi prompts in a built-in Neovim viewport without changing Pi's command
+  runtime.
+- **Works with:** This fork's four-panel fullscreen layout; not an installable feature of
+  vanilla Pi or VS Code Copilot.
+- **Requires:** The built fork, four-panel mode, and `nvim` on `PATH`. No `px` checkout,
+  external Pi Neovim module, or tmux; modified-key shortcuts additionally depend on terminal key
+  reporting.
 
-### Input and output controls
+`/input orig|nvim|both` selects the visible input panels. Drafts synchronize, and persistent
+sessions restore draft, cursor/mode, and panel visibility. Submitting through Neovim uses Pi's
+normal input path, including slash commands; the original editor still works if you do not use
+Neovim. **Setup:** [use embedded Neovim](#use-embedded-neovim-input).
 
-The fork raises the size/line threshold at which a large multiline paste is
-converted to an attachment. `super+escape` interrupts from either fullscreen
-input. In a tmux-hosted Neovim panel, Meta-Enter submits the draft to Pi when
-connected and keeps normal Neovim behavior when it is not. `/cl` clears the
-visible conversation and tool-output panels without deleting session history;
-it refuses while Pi is streaming, compacting, or running Bash. In embedded
-Neovim, `:PiClear` submits `/cl` only when the input buffer is empty; its `/cl`
-command-line mapping is active only while connected to Pi. The settings UI also
-lets users acknowledge the tmux extended-key warning without editing tmux
-configuration.
+#### Input, paste, and selection refinements
 
-To install this branch from source, use Node.js 22.19 or newer:
+- **Summary:** Improve large pastes, wrapped-text copying, scrolling, and fullscreen input
+  shortcuts.
+- **Works with:** Interactive use of this fork; most selection refinements apply in fullscreen.
+  Vanilla Pi has its own baseline input behavior.
+- **Requires:** The built fork. `super+escape` and `super+/` require a terminal that reports
+  Super; tmux is optional and may need extended-key setup for modified keys. Neovim-specific
+  submission requires the Neovim viewport.
+
+The fork delays conversion of large multiline pastes into attachments, preserves logical lines
+when copying wrapped text, and supports mouse-wheel navigation. `super+escape` interrupts Pi
+from either fullscreen input; `alt+/` provides an input-panel toggle inside tmux where Super may
+be lost. Meta-Enter submits the embedded Neovim draft when connected. **Setup:**
+[configure input and terminal keys](#configure-input-and-output-controls).
+
+#### Model and session presentation
+
+- **Summary:** Show readable model names and start the resume picker on named sessions.
+- **Works with:** This fork's interactive UI; it does not require `px` or change vanilla Pi's
+  model IDs or session storage format.
+- **Requires:** The built fork; configured models for model selection. No Neovim or tmux.
+
+The selector and footer prefer model display names and fall back to IDs, while configuration
+continues to use model IDs. `pi -r` starts with named sessions; `/resume` starts with all
+sessions. Queued steering messages remain visible. **Setup:**
+[use the model and session UI](#use-model-and-session-presentation).
+
+#### `/border` session color
+
+- **Summary:** Set or reset the fullscreen frame color per Pi session.
+- **Works with:** This fork's fullscreen UI. Separately installed child-session tools can
+  inherit the color, but are not required.
+- **Requires:** The built fork in fullscreen mode and a terminal capable of displaying the
+  chosen color. No `px`, Neovim, or tmux for the parent session.
+
+`/border #RRGGBB` sets the frame, `/border default` restores the theme default, and bare
+`/border` reports it. The choice persists with the session; a separately installed subagent
+launcher may pass it to children. **Setup:** [use `/border`](#use-border).
+
+#### `/cl` visible-output clear
+
+- **Summary:** Clear the rendered conversation and tool-output panels without deleting session
+  history.
+- **Works with:** This fork's interactive UI, in standard or fullscreen layout. No `px`
+  dependency.
+- **Requires:** The built fork; wait until streaming, compaction, or Bash has finished. Neovim
+  is only needed for the optional `:PiClear` route.
+
+`/cl` is a visual reset, not `/new` or a history erase. In embedded Neovim, `:PiClear` submits
+it only when the buffer is empty, and the Neovim `/cl` command-line mapping works only while
+connected to Pi. **Setup:** [use `/cl`](#use-cl).
+
+### Install Details
+
+#### Install the `devenv` fork
+
+Install from source with Git, Node.js 22.19 or newer, and npm. The build does not require `px`,
+`jq`, tmux, or Neovim:
 
 ```bash
 git clone --branch devenv --single-branch git@github.com:b-soder/pi.git ~/src/pi-devenv
@@ -76,11 +124,77 @@ cd packages/coding-agent
 npm link
 ```
 
-`npm run build` refreshes model data and may need network access. `npm link`
-connects the global `pi` command to this checkout; update the checkout and
-rebuild to pick up later branch changes. The embedded Neovim panel additionally
-requires the `nvim` executable. Installing the Pi branch does not install any
-optional extensions or recipient-specific configuration.
+`npm run build` refreshes model data and may need network access. `npm link` changes which
+checkout supplies your global `pi` command; inspect an existing installation before linking.
+Rebuild after later branch updates. Check `pi --version` and the chosen checkout before assuming
+the installed CLI uses this fork. Neither the build nor link installs `px`, native approval
+popups, provider credentials, or recipient-specific settings.
+
+#### Configure four-panel fullscreen
+
+Pi defaults to fullscreen mode with the standard layout. Use `/settings` to select the
+experimental four-panel layout, or merge this setting into your own `~/.pi/agent/settings.json`
+without replacing other keys:
+
+```json
+{
+  "experimentalTuiLayout": "four-panel"
+}
+```
+
+Restart Pi after changing the layout. Use the divider controls to resize the regions. To return
+to the standard layout, select `standard` in `/settings` and restart. See the
+[settings reference](packages/coding-agent/docs/settings.md#terminal-and-display).
+
+#### Use embedded Neovim input
+
+Install `nvim` separately and confirm it is on `PATH`; the Pi coding-agent package already
+contains its RPC bridge. Four-panel sessions start with the original editor visible. Use
+`/input nvim` or `/input both` to show Neovim, and `/input orig` to return. The short aliases
+are `n`/`vi`, `b`, and `o`. Neovim stays alive when hidden, and a persistent session saves
+the focused draft and mode. You do **not** need an external `px` Neovim Stow module or
+`externalEditor: "nvim"` for this embedded viewport. See the
+[settings reference](packages/coding-agent/docs/settings.md#terminal-and-display).
+
+#### Configure input and output controls
+
+The fork's paste threshold, wrap-aware copying, mouse selection, and scrolling need no extra
+package. Keyboard shortcuts do depend on the terminal path: `super+/` toggles the Neovim input
+panel outside tmux; inside tmux the fork also binds `alt+/`. `super+escape` interrupts from
+either fullscreen input if Super reaches Pi. In embedded Neovim, Command-Enter or the tmux
+Meta-Enter fallback submits when connected; ordinary Neovim behavior remains outside Pi. Use
+`/hotkeys` to inspect active bindings. If modified keys are lost in tmux, consult
+[tmux setup](packages/coding-agent/docs/tmux.md) and
+[terminal setup](packages/coding-agent/docs/terminal-setup.md); tmux settings are for key
+forwarding, not a prerequisite for the fork's layout. The `/settings` warning acknowledgement
+suppresses Pi's tmux format advisory without changing tmux configuration.
+
+#### Use model and session presentation
+
+No additional package or setting is needed. Configure/authenticate any model using Pi's normal
+provider flow; model selection still stores model IDs, not display names. Name a session with
+`/name`; `pi -r` opens a named-only picker and `Ctrl+N` shows unnamed sessions, while `/resume`
+shows all sessions by default. See
+[session and context documentation](packages/coding-agent/docs/sessions.md).
+
+#### Use `/border`
+
+In fullscreen Pi, enter `/border #RRGGBB`, `/border default`, or bare `/border` to inspect the
+current color. It persists for the session. Child inheritance is relevant only if you later
+install a subagent integration; no separate component is required for the parent's border. See
+the [settings reference](packages/coding-agent/docs/settings.md#terminal-and-display).
+
+#### Use `/cl`
+
+Run `/cl` after a turn to clear only visible output; the session file remains intact. It refuses
+while Pi is streaming, compacting, or running Bash. When embedded Neovim is connected,
+`:PiClear` works only with an empty draft and its `/cl` command-line mapping is
+connection-scoped. No Neovim installation is needed for the ordinary `/cl` command.
+
+To verify the fork without a model call, start a new interactive Pi session and inspect
+`/settings`, `/input`, `/border`, and `/cl`. Installing a different Pi version or removing
+the `experimentalTuiLayout` setting changes the UI; it does not require deleting stored sessions
+or installing `px`.
 
 Adapt Pi to your workflows, not the other way around. Customize Pi with [extensions](packages/coding-agent/docs/extensions.md), [skills](packages/coding-agent/docs/skills.md), [prompt templates](packages/coding-agent/docs/prompt-templates.md), and [themes](packages/coding-agent/docs/themes.md). Bundle them as [Pi packages](packages/coding-agent/docs/packages.md) and share via npm or git.
 
