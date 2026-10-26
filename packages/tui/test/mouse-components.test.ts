@@ -283,6 +283,28 @@ describe("mouse-aware components", () => {
 		tui.stop();
 	});
 
+	it("positions the cursor on the clicked row when editor borders are hidden", async () => {
+		const terminal = new VirtualTerminal(20, 6);
+		const tui = new TuiAltScreen(terminal);
+		const editor = new Editor(tui, editorTheme);
+		editor.setPanelBordersHidden(true);
+		editor.setText("first\nsecond");
+		tui.addChild(editor);
+		tui.start();
+		await terminal.waitForRender();
+
+		terminal.sendInput("\x1b[<0;5;2M");
+		terminal.sendInput("\x1b[<0;5;2m");
+		await terminal.waitForRender();
+		assert.strictEqual(editor.getCursor().line, 1);
+
+		terminal.sendInput("X");
+		await terminal.waitForRender();
+		assert.strictEqual(editor.getText().split("\n")[0], "first");
+		assert.match(editor.getText().split("\n")[1] ?? "", /X/);
+		tui.stop();
+	});
+
 	it("selects and copies editor text on drag instead of moving the cursor", async () => {
 		const terminal = new VirtualTerminal(20, 6);
 		const copied: string[] = [];
