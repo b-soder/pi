@@ -199,6 +199,7 @@ describe("generated configuration schemas", () => {
 			{ httpIdleTimeoutMs: "bogus" },
 			{ websocketConnectTimeoutMs: "30000" },
 			{ codemode: { inlineBudget: -1 } },
+			{ modelBorderColors: { "github-copilot/gpt-6-luna": "cyan" } },
 		]) {
 			expect(validator.Check(invalid)).toBe(false);
 		}
@@ -212,6 +213,10 @@ describe("generated configuration schemas", () => {
 				httpIdleTimeoutMs: 0,
 				websocketConnectTimeoutMs: "disabled",
 				codemode: { inlineBudget: 0 },
+				modelBorderColors: {
+					"github-copilot/gpt-6-luna": "#00FFFF",
+					"github-copilot/gpt-6.1-sol": "#FF0000",
+				},
 			}),
 		).toBe(true);
 	});

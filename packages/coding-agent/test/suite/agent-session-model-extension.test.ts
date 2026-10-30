@@ -38,10 +38,18 @@ describe("AgentSession model and extension characterization", () => {
 		});
 		harnesses.push(harness);
 		const nextModel = harness.getModel("faux-2")!;
+		const appendedModelChanges: string[] = [];
+		const unsubscribe = harness.session.subscribe((event) => {
+			if (event.type === "entry_appended" && event.entry.type === "model_change") {
+				appendedModelChanges.push(`${event.entry.provider}/${event.entry.modelId}`);
+			}
+		});
 
 		await harness.session.setModel(nextModel);
+		unsubscribe();
 
 		expect(harness.session.model?.id).toBe("faux-2");
+		expect(appendedModelChanges).toEqual([`${nextModel.provider}/${nextModel.id}`]);
 		expect(modelEvents).toEqual(["faux-1->faux-2:set"]);
 		expect(
 			harness.sessionManager
@@ -187,6 +195,12 @@ describe("AgentSession model and extension characterization", () => {
 			thinkingLevel?: ThinkingLevel;
 		}>);
 		harness.session.setThinkingLevel("high");
+		const appendedModelChanges: string[] = [];
+		const unsubscribe = harness.session.subscribe((event) => {
+			if (event.type === "entry_appended" && event.entry.type === "model_change") {
+				appendedModelChanges.push(`${event.entry.provider}/${event.entry.modelId}`);
+			}
+		});
 
 		await harness.session.cycleModel();
 		expect(harness.session.model?.id).toBe("faux-2");
@@ -195,6 +209,11 @@ describe("AgentSession model and extension characterization", () => {
 		await harness.session.cycleModel();
 		expect(harness.session.model?.id).toBe("faux-1");
 		expect(harness.session.thinkingLevel).toBe("high");
+		unsubscribe();
+		expect(appendedModelChanges).toEqual([
+			`${modelTwo.provider}/${modelTwo.id}`,
+			`${modelOne.provider}/${modelOne.id}`,
+		]);
 	});
 
 	it("clamps thinking levels to model capabilities and cycles available levels", async () => {

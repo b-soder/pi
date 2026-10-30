@@ -29,6 +29,16 @@
       },
       "description": "Per-model default thinking level overrides keyed by \"provider/modelId\"."
     },
+    "modelBorderColors": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "type": "string",
+          "pattern": "^#[\\da-fA-F]{6}$"
+        }
+      },
+      "description": "Global-only fullscreen border colors keyed by exact \"provider/modelId\". Applied at startup and when changing models; unmatched models leave the current color unchanged."
+    },
     "transport": {
       "anyOf": [
         {

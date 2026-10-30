@@ -14,6 +14,7 @@ Add `"$schema": "https://pi.dev/schemas/settings.schema.json"` to `settings.json
 | `defaultModel` | string | Automatic | Startup model ID. |
 | `defaultThinkingLevel` | `"off" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh" \| "max"` | `"medium"` | Startup thinking level. |
 | `modelThinkingLevels` | object | None | Per-model startup thinking levels keyed by exact `provider/modelId`. |
+| `modelBorderColors` | object | None | Global-only fullscreen border colors keyed by exact `provider/modelId`. A match applies at startup and on model changes, even over a manually set border; an unmapped model leaves the current border unchanged. |
 | `thinkingBudgets` | object | Built-in budgets | Token budgets for `minimal`, `low`, `medium`, and `high` thinking levels. |
 | `enabledModels` | `string[]` | All available models | Model patterns used for startup selection and model cycling. Uses the same format as `--models`. |
 | `hideThinkingBlock` | boolean | `false` | Hide thinking blocks in the transcript. |
@@ -101,7 +102,7 @@ See [Compaction Reference](compaction.md) for trigger, summarization, and valida
 
 In the experimental fullscreen layout, `/input orig|o`, `/input nvim|vi|n`, and `/input both|b` choose which input panels are visible. New sessions start with the original input only. `⌘-/` toggles between Neovim-only and both panels and moves focus; the Neovim instance stays alive when hidden. The two drafts synchronize in either direction, including while a panel is hidden. Draft text, panel visibility, and Neovim insert/normal mode are saved beside a persisted session and restored on resume. If an otherwise-empty persisted session needs to save non-default input state, Pi creates its session header; non-persistent sessions remain in memory. Flushing from Neovim uses Pi's normal input handler, so Pi slash commands still run through the original input path.
 
-In fullscreen mode, `/border #RRGGBB` sets the one-cell frame color; `/border default` restores the default gray. `/border` with no argument reports the current color.
+In fullscreen mode, `/border #RRGGBB` sets the one-cell frame color; `/border default` restores the default gray. `/border` with no argument reports the current color. A matching global `modelBorderColors` entry overrides a manual color at startup or the next model change; an unmapped model does not change it.
 | `fullscreenExitOutput` | `"transcript" \| "resume-hint"` | `"transcript"` | Output printed when fullscreen mode exits. |
 | `fullscreenScrollbar` | `"auto" \| "always" \| "hidden"` | `"auto"` | Fullscreen transcript scrollbar behavior. |
 | `fullscreenCopyOnSelect` | boolean | `true` | Copy selected text automatically in fullscreen mode. |

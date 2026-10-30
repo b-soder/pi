@@ -1,6 +1,11 @@
 import { colorToHex, parseColor } from "@earendil-works/pi-tui";
 import { describe, expect, test } from "vitest";
-import { readBorderBrightness, readBorderColor, scaleBorderBrightness } from "../src/modes/interactive/border-color.ts";
+import {
+	readBorderBrightness,
+	readBorderColor,
+	resolveModelBorderColor,
+	scaleBorderBrightness,
+} from "../src/modes/interactive/border-color.ts";
 
 describe("subagent border color", () => {
 	test("reads only a valid six-digit color override", () => {
@@ -8,6 +13,18 @@ describe("subagent border color", () => {
 		expect(readBorderColor(" #123456 ")).toBe("#123456");
 		expect(readBorderColor("#abc")).toBeUndefined();
 		expect(readBorderColor("#123456; echo unsafe")).toBeUndefined();
+	});
+
+	test("resolves exact provider/model color mappings and ignores unknown or invalid colors", () => {
+		const colors = {
+			"github-copilot/gpt-6-luna": "#00FFFF",
+			"github-copilot/gpt-6.1-sol": "not-a-color",
+		};
+
+		expect(resolveModelBorderColor(colors, "github-copilot", "gpt-6-luna")).toBe("#00FFFF");
+		expect(resolveModelBorderColor(colors, "github-copilot", "gpt-6.1-sol")).toBeUndefined();
+		expect(resolveModelBorderColor(colors, "github-copilot", "unknown-model")).toBeUndefined();
+		expect(resolveModelBorderColor(colors, undefined, "gpt-6-luna")).toBeUndefined();
 	});
 
 	test("defaults invalid brightness to full and clamps valid numbers", () => {

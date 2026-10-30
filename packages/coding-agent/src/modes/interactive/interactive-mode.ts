@@ -142,6 +142,7 @@ import {
 	BORDER_COLOR_ENV,
 	readBorderBrightness,
 	readBorderColor,
+	resolveModelBorderColor,
 	scaleBorderBrightness,
 } from "./border-color.ts";
 import { reportBug } from "./bug-report.ts";
@@ -3368,6 +3369,23 @@ export class InteractiveMode {
 		return manager.isPersisted() && sessionFile ? getInputSessionStatePath(sessionFile) : undefined;
 	}
 
+	private applyModelBorderColor(provider: string | undefined, modelId: string | undefined): void {
+		const color = resolveModelBorderColor(
+			this.settingsManager.getGlobalSettings().modelBorderColors,
+			provider,
+			modelId,
+		);
+		if (!color) return;
+
+		this.viewportBorderColor = color;
+		this.persistedBorderColor = color;
+		this.viewportBorderBrightness = 1;
+		process.env[BORDER_COLOR_ENV] = color;
+		process.env[BORDER_BRIGHTNESS_ENV] = "1";
+		if (this.renderer instanceof TuiAltScreen) this.applyViewportBorderStyle(this.renderer);
+		this.scheduleInputSessionStateSave();
+	}
+
 	private restoreInputStateForCurrentSession(): void {
 		const statePath = this.inputSessionStatePath();
 		const state = statePath ? readInputSessionState(statePath, this.sessionManager.getSessionId()) : undefined;
@@ -3395,6 +3413,8 @@ export class InteractiveMode {
 		} finally {
 			this.restoringInputState = false;
 		}
+		const currentModel = this.session.model;
+		this.applyModelBorderColor(currentModel?.provider, currentModel?.id);
 		if (this.isInitialized) {
 			if (this.inputPanelMode === "nvim" && this.nvimViewportContainer) {
 				void this.nvimViewportContainer.ready.then(() => {
@@ -3833,6 +3853,10 @@ export class InteractiveMode {
 
 			case "entry_appended":
 				if (this.entriesRenderedByBoundaryCompaction.delete(event.entry.id)) break;
+				if (event.entry.type === "model_change") {
+					this.applyModelBorderColor(event.entry.provider, event.entry.modelId);
+					break;
+				}
 				if (event.entry.type === "custom") {
 					this.addCustomEntryToChat(event.entry);
 					this.ui.requestRender();

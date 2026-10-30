@@ -7,7 +7,8 @@ import { Editor } from "../../tui/src/components/editor.ts";
 import { TuiMainScreen } from "../../tui/src/tui-main-screen.ts";
 import { defaultEditorTheme } from "../../tui/test/test-themes.ts";
 import { VirtualTerminal } from "../../tui/test/virtual-terminal.ts";
-import { BORDER_COLOR_ENV } from "../src/modes/interactive/border-color.ts";
+import type { AgentSessionEvent } from "../src/core/agent-session.ts";
+import { BORDER_BRIGHTNESS_ENV, BORDER_COLOR_ENV } from "../src/modes/interactive/border-color.ts";
 import { NeovimViewport } from "../src/modes/interactive/components/neovim-viewport.ts";
 import { getInputSessionStatePath, writeInputSessionState } from "../src/modes/interactive/input-session-state.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
@@ -40,6 +41,21 @@ type InputStateThis = {
 	renderer?: { getFocusedComponent: () => unknown };
 };
 
+type HandleModelEntryThis = {
+	isInitialized: boolean;
+	footer: { invalidate: () => void };
+	programStatus: { handleEvent: (event: AgentSessionEvent) => void };
+	entriesRenderedByBoundaryCompaction: Set<string>;
+	applyModelBorderColor: (provider: string | undefined, modelId: string | undefined) => void;
+};
+type ModelBorderThis = {
+	settingsManager: { getGlobalSettings: () => { modelBorderColors?: Record<string, string> } };
+	viewportBorderColor: string | undefined;
+	persistedBorderColor: string | null | undefined;
+	viewportBorderBrightness: number;
+	scheduleInputSessionStateSave: () => void;
+	renderer?: object;
+};
 type BorderCommandThis = {
 	viewportBorderColor: string | undefined;
 	persistedBorderColor: string | null | undefined;
@@ -59,11 +75,18 @@ type RestoreBorderThis = {
 	sessionManager: { getSessionId: () => string };
 	editor: EditorMock;
 	isInitialized: false;
+	session: { model?: { provider: string; id: string } };
+	settingsManager: { getGlobalSettings: () => { modelBorderColors?: Record<string, string> } };
+	applyModelBorderColor: (provider: string | undefined, modelId: string | undefined) => void;
+	scheduleInputSessionStateSave: () => void;
+	renderer?: object;
 	ui: { requestRender: () => void; setFocus: (component: unknown) => void };
 };
 
 const prototype = InteractiveMode.prototype as unknown as {
+	handleEvent(this: HandleModelEntryThis, event: AgentSessionEvent): Promise<void>;
 	handleBorderCommand(this: BorderCommandThis, text: string): void;
+	applyModelBorderColor(this: ModelBorderThis, provider: string | undefined, modelId: string | undefined): void;
 	restoreInputStateForCurrentSession(this: RestoreBorderThis): void;
 	handleOriginalInputChange(this: InputStateThis, text: string): void;
 	handleNeovimDraftChange(this: InputStateThis, text: string, mode: "i" | "n"): void;
@@ -93,6 +116,7 @@ describe("InteractiveMode input state", () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "pi-border-state-"));
 		const statePath = getInputSessionStatePath(join(tempDir, "session.jsonl"));
 		const previousColor = process.env[BORDER_COLOR_ENV];
+		const previousBrightness = process.env[BORDER_BRIGHTNESS_ENV];
 		const context: RestoreBorderThis = {
 			startupBorderColor: "#112233",
 			viewportBorderColor: "#112233",
@@ -105,6 +129,10 @@ describe("InteractiveMode input state", () => {
 			sessionManager: { getSessionId: () => "px-session" },
 			editor: { getText: () => "", setText: vi.fn() },
 			isInitialized: false,
+			session: {},
+			settingsManager: { getGlobalSettings: () => ({}) },
+			applyModelBorderColor: vi.fn(),
+			scheduleInputSessionStateSave: vi.fn(),
 			ui: { requestRender: vi.fn(), setFocus: vi.fn() },
 		};
 
@@ -134,7 +162,80 @@ describe("InteractiveMode input state", () => {
 		} finally {
 			if (previousColor === undefined) delete process.env[BORDER_COLOR_ENV];
 			else process.env[BORDER_COLOR_ENV] = previousColor;
+			if (previousBrightness === undefined) delete process.env[BORDER_BRIGHTNESS_ENV];
+			else process.env[BORDER_BRIGHTNESS_ENV] = previousBrightness;
 			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("applies a mapped color when a model-change session entry is emitted", async () => {
+		const applyModelBorderColor = vi.fn();
+		const context: HandleModelEntryThis = {
+			isInitialized: true,
+			footer: { invalidate: vi.fn() },
+			programStatus: { handleEvent: vi.fn() },
+			entriesRenderedByBoundaryCompaction: new Set(),
+			applyModelBorderColor,
+		};
+
+		await prototype.handleEvent.call(context, {
+			type: "entry_appended",
+			entry: {
+				type: "model_change",
+				id: "model-change",
+				parentId: null,
+				timestamp: new Date().toISOString(),
+				provider: "github-copilot",
+				modelId: "gpt-6.1-terra",
+			},
+		});
+
+		expect(applyModelBorderColor).toHaveBeenCalledWith("github-copilot", "gpt-6.1-terra");
+	});
+
+	test("model colors override manual colors on matching model changes and leave unmapped models alone", () => {
+		const previousColor = process.env[BORDER_COLOR_ENV];
+		const previousBrightness = process.env[BORDER_BRIGHTNESS_ENV];
+		const scheduleSave = vi.fn();
+		const context: ModelBorderThis = {
+			settingsManager: {
+				getGlobalSettings: () => ({
+					modelBorderColors: {
+						"github-copilot/gpt-6-luna": "#00FFFF",
+						"github-copilot/gpt-6.1-sol": "#FF0000",
+					},
+				}),
+			},
+			viewportBorderColor: "#112233",
+			persistedBorderColor: "#112233",
+			viewportBorderBrightness: 0.5,
+			scheduleInputSessionStateSave: scheduleSave,
+		};
+
+		try {
+			prototype.applyModelBorderColor.call(context, "github-copilot", "gpt-6-luna");
+			expect(context.viewportBorderColor).toBe("#00FFFF");
+			expect(context.persistedBorderColor).toBe("#00FFFF");
+			expect(context.viewportBorderBrightness).toBe(1);
+			expect(process.env[BORDER_COLOR_ENV]).toBe("#00FFFF");
+			expect(process.env[BORDER_BRIGHTNESS_ENV]).toBe("1");
+
+			context.viewportBorderColor = "#A1B2C3";
+			context.persistedBorderColor = "#A1B2C3";
+			prototype.applyModelBorderColor.call(context, "github-copilot", "unmapped-model");
+			expect(context.viewportBorderColor).toBe("#A1B2C3");
+			expect(context.persistedBorderColor).toBe("#A1B2C3");
+			expect(scheduleSave).toHaveBeenCalledOnce();
+
+			prototype.applyModelBorderColor.call(context, "github-copilot", "gpt-6.1-sol");
+			expect(context.viewportBorderColor).toBe("#FF0000");
+			expect(context.persistedBorderColor).toBe("#FF0000");
+			expect(scheduleSave).toHaveBeenCalledTimes(2);
+		} finally {
+			if (previousColor === undefined) delete process.env[BORDER_COLOR_ENV];
+			else process.env[BORDER_COLOR_ENV] = previousColor;
+			if (previousBrightness === undefined) delete process.env[BORDER_BRIGHTNESS_ENV];
+			else process.env[BORDER_BRIGHTNESS_ENV] = previousBrightness;
 		}
 	});
 

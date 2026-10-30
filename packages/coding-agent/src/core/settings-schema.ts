@@ -216,6 +216,12 @@ export const SettingsSchema = Type.Object(
 				description: 'Per-model default thinking level overrides keyed by "provider/modelId".',
 			}),
 		),
+		modelBorderColors: Type.Optional(
+			Type.Record(Type.String(), Type.String({ pattern: "^#[\\da-fA-F]{6}$" }), {
+				description:
+					'Global-only fullscreen border colors keyed by exact "provider/modelId". Applied at startup and when changing models; unmatched models leave the current color unchanged.',
+			}),
+		),
 		transport: Type.Optional(
 			Type.Union(
 				[Type.Literal("auto"), Type.Literal("sse"), Type.Literal("websocket"), Type.Literal("websocket-cached")],

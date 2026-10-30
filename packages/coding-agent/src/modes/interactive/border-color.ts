@@ -9,6 +9,15 @@ export function readBorderColor(value: string | undefined): string | undefined {
 	return color && /^#[\da-f]{6}$/i.test(color) ? color.toUpperCase() : undefined;
 }
 
+export function resolveModelBorderColor(
+	colors: Record<string, string> | undefined,
+	provider: string | undefined,
+	modelId: string | undefined,
+): string | undefined {
+	if (!colors || !provider || !modelId) return undefined;
+	return readBorderColor(colors[`${provider}/${modelId}`]);
+}
+
 export function readBorderBrightness(value: string | undefined): number {
 	if (value === undefined || value.trim() === "") return 1;
 	const brightness = Number(value);
