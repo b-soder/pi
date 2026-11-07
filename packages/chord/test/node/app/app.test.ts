@@ -3,7 +3,7 @@
 // marks (a worker base's inputs among them), and export and import per address (documents, tables and files
 // round-trip; an existing address refused).
 
-import { chmod, mkdir, readdir, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, realpath, stat, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -26,7 +26,11 @@ describe("starting and closing", () => {
 			expect.arrayContaining(["cookie-secret", "store.sqlite"]),
 		);
 		const info = await app.host.get(AppInfo, {}, context);
-		expect([info.dataDir.value, info.name.value, info.version.value]).toEqual([dataDir, "chord-test", "v1"]);
+		expect([info.dataDir.value, info.name.value, info.version.value]).toEqual([
+			await realpath(dataDir),
+			"chord-test",
+			"v1",
+		]);
 		expect((await app.host.get(Echo, {}, context)).text.value).toBe("echo");
 		expect(app.ownerLink()).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:${port}/_chord/owner#[A-Za-z0-9_-]{43}$`));
 		expect(app.workers.size).toBe(0);

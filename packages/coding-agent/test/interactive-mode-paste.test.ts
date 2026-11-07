@@ -16,8 +16,8 @@ import { CustomEditor } from "../src/modes/interactive/components/custom-editor.
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 import { getEditorTheme, initTheme, type Theme } from "../src/modes/interactive/theme/theme.ts";
 
-// Pastes over 10 lines collapse into a marker whose content only the receiving editor can expand.
-const COLLAPSED_PASTE_LINE_COUNT = 12;
+// Pastes over 100 lines collapse into a marker whose content only the receiving editor can expand.
+const COLLAPSED_PASTE_LINE_COUNT = 101;
 
 function pastedText(label: string): string {
 	return Array.from({ length: COLLAPSED_PASTE_LINE_COUNT }, (_, i) => `${label} ${i + 1}`).join("\n");
