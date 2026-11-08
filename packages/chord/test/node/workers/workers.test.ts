@@ -7,7 +7,7 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,7 +60,7 @@ describe("starts on demand", () => {
 
 describe('the worker base (decision "Workers start from the base code the server booted with")', () => {
 	it("a worker started after an edit of the entry's imported source runs the code the component was created with", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "chord-workers-base-"));
+		const dir = await realpath(await mkdtemp(join(tmpdir(), "chord-workers-base-")));
 		// The fixture worker, plus a line naming its label and the file it was forked from.
 		await writeFile(join(dir, "label.ts"), 'export const label = "boot";\n');
 		await writeFile(
