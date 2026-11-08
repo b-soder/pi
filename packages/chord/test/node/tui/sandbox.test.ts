@@ -4,7 +4,7 @@
 // details and whether a path exists are its known gaps). The whole sandbox, from the app's terminal code and from a
 // plugin: no builtin past the allowlist (shared prototypes changed first included), no getter on a prototype of Node's
 // process, no `import()`, no Node `process`. Run under Node 26.5.1 or later (`TUI_NODE`), on a pseudo-terminal;
-// skipped without.
+// macOS requires /usr/bin/python3 for its stdlib PTY adapter (no package); skipped when Node is unavailable.
 
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
@@ -19,12 +19,25 @@ import { Launched, TUI_NODE, tuiApp } from "./support.ts";
 
 const RUN = fileURLToPath(new URL("../fixtures/tui/sandbox-run.ts", import.meta.url));
 const OS_LAYER = fileURLToPath(new URL("../fixtures/tui/os-layer.ts", import.meta.url));
+const PTY_DRIVER = fileURLToPath(new URL("./pty-driver.py", import.meta.url));
 
 describe.skipIf(TUI_NODE === undefined)("the sandbox", () => {
 	it("as a process reaches no terminal, file, SQLite, network or environment, past any JavaScript (Opus E1, E2)", () => {
 		// On a pseudo-terminal, as a launcher runs: the child's descriptors are pipes all the same.
 		const command = [TUI_NODE!, "--no-warnings", OS_LAYER].map((arg) => `'${arg}'`).join(" ");
-		const output = execFileSync("script", ["-qefc", command, "/dev/null"], { encoding: "utf8", timeout: 30_000 });
+		const options = {
+			encoding: "utf8" as const,
+			timeout: 30_000,
+			env: { ...process.env, CHORD_SANDBOX_TEST_CANARY: "not-forwarded" },
+		};
+		const output =
+			process.platform === "darwin"
+				? execFileSync(
+						"/usr/bin/python3",
+						[PTY_DRIVER, "script", "-q", "-e", "/dev/null", TUI_NODE!, "--no-warnings", OS_LAYER],
+						options,
+					)
+				: execFileSync("script", ["-qefc", command, "/dev/null"], options);
 		const outcomes = JSON.parse(output.slice(output.indexOf("{"))) as Record<string, string>;
 		expect(outcomes).toEqual({
 			"a terminal descriptor": "none",
@@ -40,6 +53,7 @@ describe.skipIf(TUI_NODE === undefined)("the sandbox", () => {
 			"a worker": "ERR_ACCESS_DENIED",
 			"an addon": "ERR_DLOPEN_DISABLED",
 			"the inspector": "ERR_ACCESS_DENIED",
+			// Empty means no unapproved inherited keys; only the declared library path and Darwin's injected key are allowed.
 			"an environment": "empty",
 			// Known gaps: Node has no permission for signals, and the machine's details need none.
 			"signal the launcher": "ok",

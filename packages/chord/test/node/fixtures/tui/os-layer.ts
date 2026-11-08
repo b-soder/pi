@@ -4,7 +4,7 @@
 // JavaScript layer would. Prints the probe's outcomes as JSON. Run it on a pseudo-terminal: the probe looks for one.
 
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,6 +22,8 @@ const attempt = async (name, run) => {
 	}
 };
 const port = Number(process.argv[2]);
+const existingPath = process.argv[3];
+const missingPath = process.argv[4];
 (async () => {
 	const tty = require("node:tty");
 	const fs = require("node:fs");
@@ -49,7 +51,9 @@ const port = Number(process.argv[2]);
 	await attempt("an addon", () => process.dlopen({ exports: {} }, "/nonexistent.node"));
 	await attempt("the inspector", () => require("node:inspector").open(0));
 	await attempt("an environment", () => {
-		const names = Object.keys(process.env).filter((name) => name !== "LD_LIBRARY_PATH");
+		const names = Object.keys(process.env).filter(
+		(name) => name !== "LD_LIBRARY_PATH" && !(process.platform === "darwin" && name === "__CF_USER_TEXT_ENCODING"),
+	);
 		if (names.length === 0) throw new Error("empty");
 	});
 	// Known gaps: signals to the user's processes, the machine's details, whether a path exists.
@@ -66,7 +70,7 @@ const port = Number(process.argv[2]);
 				return error.code;
 			}
 		};
-		if (code("/etc/hostname") === code("/etc/no-such-file-chord")) throw new Error("no difference");
+		if (code(existingPath) === code(missingPath)) throw new Error("no difference");
 	});
 	process.stdout.write(JSON.stringify(outcomes));
 })();
@@ -74,14 +78,21 @@ const port = Number(process.argv[2]);
 
 const server = createServer((socket) => socket.destroy());
 await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-const directory = await mkdtemp(join(tmpdir(), "chord-tui-"));
+const directory = await realpath(await mkdtemp(join(tmpdir(), "chord-tui-")));
+const existingPath = join(directory, "known-existing.cjs");
+const missingPath = join(directory, "known-missing.cjs");
 await writeFile(join(directory, BOOTSTRAP_FILE), PROBE);
+await writeFile(existingPath, "");
 const port = String((server.address() as { port: number }).port);
-const child = spawn(process.execPath, [...sandboxFlags(join(directory, BOOTSTRAP_FILE)), port], {
-	stdio: ["pipe", "pipe", "pipe"],
-	env: sandboxEnvironment(),
-	cwd: directory,
-});
+const child = spawn(
+	process.execPath,
+	[...sandboxFlags(join(directory, BOOTSTRAP_FILE)), port, existingPath, missingPath],
+	{
+		stdio: ["pipe", "pipe", "pipe"],
+		env: sandboxEnvironment(),
+		cwd: directory,
+	},
+);
 let output = "";
 child.stdout.on("data", (chunk: Buffer) => {
 	output += chunk.toString();
