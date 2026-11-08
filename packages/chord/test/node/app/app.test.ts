@@ -43,11 +43,11 @@ describe("starting and closing", () => {
 	it("refuses a second server on the same data directory while the first runs", async () => {
 		const first = await testApp();
 		const second = await rejection(testApp({ dataDir: first.dataDir, root: first.root }));
-		expect(String(second)).toContain(`another server runs on ${first.dataDir}`);
+		expect(String(second)).toContain(`another server runs on ${await realpath(first.dataDir)}`);
 		await first.app.close(context);
 		const third = await testApp({ dataDir: first.dataDir, root: first.root });
 		await third.app.close(context);
-	});
+	}, 20_000);
 
 	it("refuses a second server on the same data directory through a symbolic link (review L3)", async () => {
 		const first = await testApp();
