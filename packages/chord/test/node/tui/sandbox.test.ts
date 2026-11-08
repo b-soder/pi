@@ -7,6 +7,9 @@
 // skipped without.
 
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { BACKGROUND_CONTEXT as context } from "../../../src/context/index.ts";
@@ -43,6 +46,34 @@ describe.skipIf(TUI_NODE === undefined)("the sandbox", () => {
 			"os details": "ok",
 			"whether a path exists": "ok",
 		});
+	});
+
+	it("starts its bootstrap from a symlinked TMPDIR without widening the file grant", () => {
+		const parent = mkdtempSync(join(tmpdir(), "chord-tui-tmpdir-"));
+		const alias = join(parent, "alias");
+		symlinkSync(parent, alias);
+		const previous = process.env.TMPDIR;
+		process.env.TMPDIR = alias;
+		try {
+			const source = [
+				'globalThis.chordBridge.send({ kind: "write", data: "ready" });',
+				'globalThis.chordBridge.send({ kind: "exit", code: 0 });',
+			].join("\n");
+			const output = execFileSync(TUI_NODE!, ["--no-warnings", RUN, source], {
+				encoding: "utf8",
+				timeout: 10_000,
+			});
+			const messages = output
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line) as { readonly kind: string; readonly data?: unknown });
+			expect(messages.map(({ kind }) => kind)).toEqual(["write", "exit"]);
+			expect(messages[0]?.data).toBe("ready");
+		} finally {
+			if (previous === undefined) delete process.env.TMPDIR;
+			else process.env.TMPDIR = previous;
+			rmSync(parent, { recursive: true, force: true });
+		}
 	});
 
 	it("closes every escape to the app's code and to plugins, on a real terminal (Fable C1, Opus H1, E1, E2)", async () => {
