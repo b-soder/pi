@@ -784,7 +784,8 @@ describe("ToolExecutionComponent parity", () => {
 				false,
 			);
 
-			const collapsed = stripAnsi(component.render(120).join("\n"));
+			// This case checks compact-read semantics, not terminal wrapping; fit the full expected path.
+			const collapsed = stripAnsi(component.render(Math.max(240, scenario.compact.length + 30)).join("\n"));
 			expect(collapsed).toContain(scenario.compact);
 			expect(collapsed).not.toContain(scenario.hidden);
 			if (scenario.absent) {

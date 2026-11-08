@@ -6,7 +6,7 @@
 // never waits on a FIFO, reads only the file confirmed, and reads exactly the size it found.
 
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -135,7 +135,7 @@ describe("the platform's opener", () => {
 
 describe("attaching a file", () => {
 	it("shows the path by its text before the yes; refuses a directory, a missing file and one over 16 MiB alike (Opus L2, E5, E9)", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "chord-attach-"));
+		const dir = await realpath(await mkdtemp(join(tmpdir(), "chord-attach-")));
 		await writeFile(join(dir, "photo.png"), "png bytes");
 		const asked = terminal(true);
 		expect(await attach(join(dir, "photo.png"), asked)).toEqual({
@@ -178,7 +178,7 @@ describe("attaching a file", () => {
 	});
 
 	it("reads only the file confirmed: a parent directory swapped for a link after the yes is refused (Opus R1)", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "chord-attach-"));
+		const dir = await realpath(await mkdtemp(join(tmpdir(), "chord-attach-")));
 		await mkdir(join(dir, "a"));
 		await mkdir(join(dir, "b"));
 		await writeFile(join(dir, "a", "notes.txt"), "shown");
@@ -219,7 +219,7 @@ describe("attaching a file", () => {
 	});
 
 	it("never waits on a FIFO: opened without blocking, refused as no regular file (Opus E12)", async () => {
-		const dir = await mkdtemp(join(tmpdir(), "chord-attach-"));
+		const dir = await realpath(await mkdtemp(join(tmpdir(), "chord-attach-")));
 		const fifo = join(dir, "fifo");
 		execFileSync("mkfifo", [fifo]);
 		await expect(attach(fifo, terminal(true))).rejects.toThrow("attach: that file cannot be attached");
