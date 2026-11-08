@@ -7,7 +7,7 @@
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -24,7 +24,7 @@ afterEach(async () => {
 
 /** A temporary directory with `files` (relative path to contents), removed after the test. */
 async function project(files: Readonly<Record<string, string>>): Promise<string> {
-	const dir = await mkdtemp(join(tmpdir(), "chord-worker-base-"));
+	const dir = await realpath(await mkdtemp(join(tmpdir(), "chord-worker-base-")));
 	made.push(dir);
 	for (const [path, contents] of Object.entries(files)) {
 		await mkdir(dirname(join(dir, path)), { recursive: true });
