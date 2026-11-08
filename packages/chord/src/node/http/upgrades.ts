@@ -149,10 +149,14 @@ export class Upgrades {
 		for (const upgraded of this.#open) end(upgraded);
 	}
 
-	/** Keeps `upgraded` until its socket closes; an error (an oversized frame) terminates only that socket. */
+	/** Keeps `upgraded` until its socket closes; an oversized frame's 1009 close or a fatal error ends only it. */
 	#keep(upgraded: Upgraded): void {
 		const { socket } = upgraded;
-		socket.on("error", () => socket.terminate());
+		socket.on("error", (error) => {
+			// ws queues a 1009 close before emitting this error; terminating here drops that protocol frame.
+			if ("code" in error && error.code === "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH") return;
+			socket.terminate();
+		});
 		this.#open.add(upgraded);
 		socket.once("close", () => this.#open.delete(upgraded));
 	}

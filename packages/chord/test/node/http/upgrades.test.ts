@@ -136,11 +136,29 @@ describe("the links endpoint", () => {
 
 	it("takes frames of at most 1 MiB unless links.options says otherwise (Opus's audit H2)", async () => {
 		const server = await served({}, { config: { links: { path: "/chord" } } });
-		const socket = await socketTo(server.port, "/chord", { "x-principal": "owner" });
-		const closed = closeOf(socket);
-		socket.send(Buffer.alloc(1024 * 1024 + 1));
-		expect((await closed).code).toBe(1009);
-		await server.close();
+		try {
+			const socket = await socketTo(server.port, "/chord", { "x-principal": "owner" });
+			const closed = closeOf(socket);
+			socket.send(Buffer.alloc(1024 * 1024 + 1));
+			expect((await closed).code).toBe(1009);
+		} finally {
+			await server.close();
+		}
+	});
+
+	it("terminates other socket errors while preserving their protocol close", async () => {
+		const terminate = vi.spyOn(WebSocket.prototype, "terminate");
+		const server = await served({}, { config: { links: { path: "/chord" } } });
+		try {
+			const socket = await socketTo(server.port, "/chord", { "x-principal": "owner" });
+			const closed = closeOf(socket);
+			socket.send(Buffer.from([0xff]), { binary: false });
+			expect((await closed).code).toBe(1007);
+			expect(terminate).toHaveBeenCalledTimes(1);
+		} finally {
+			await server.close();
+			terminate.mockRestore();
+		}
 	});
 
 	it("cuts off a client that stopped reading: past 4 MiB unsent beyond the frame being sent", () => {
