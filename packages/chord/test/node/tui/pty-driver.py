@@ -6,13 +6,16 @@ import os
 import pty
 import selectors
 import signal
+import stat
 import subprocess
 import sys
+import tty
 
 if len(sys.argv) < 2:
     raise SystemExit("usage: pty-driver.py COMMAND [ARG ...]")
 
 master, slave = pty.openpty()
+tty.setraw(slave)
 child = subprocess.Popen(
     sys.argv[1:], stdin=slave, stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True, start_new_session=True
 )
@@ -38,10 +41,13 @@ selector = selectors.DefaultSelector()
 selector.register(master, selectors.EVENT_READ, "pty")
 selector.register(child.stdout, selectors.EVENT_READ, "stdout")
 selector.register(child.stderr, selectors.EVENT_READ, "stderr")
-outputs = {"stdout": bytearray(), "stderr": bytearray()}
+stdin_mode = os.fstat(sys.stdin.fileno()).st_mode
+stdin_registered = stat.S_ISFIFO(stdin_mode) or stat.S_ISSOCK(stdin_mode)
+if stdin_registered:
+    selector.register(sys.stdin.buffer, selectors.EVENT_READ, "stdin")
 
 while selector.get_map():
-    for key, _ in selector.select():
+    for key, _ in selector.select(timeout=0.1):
         try:
             data = os.read(key.fd, 65536)
         except OSError as error:
@@ -53,14 +59,24 @@ while selector.get_map():
             selector.unregister(key.fileobj)
             if key.data == "pty":
                 os.close(master)
+            elif key.data == "stdin":
+                stdin_registered = False
             else:
                 key.fileobj.close()
-        elif key.data != "pty":
-            outputs[key.data].extend(data)
+        elif key.data == "stdin":
+            view = memoryview(data)
+            while view:
+                written = os.write(master, view)
+                view = view[written:]
+        elif key.data == "stdout":
+            sys.stdout.buffer.write(data)
+            sys.stdout.flush()
+        elif key.data == "stderr":
+            sys.stderr.buffer.write(data)
+            sys.stderr.flush()
+    if child.poll() is not None and stdin_registered:
+        selector.unregister(sys.stdin.buffer)
+        stdin_registered = False
 
 status = child.wait()
-sys.stdout.buffer.write(outputs["stdout"])
-sys.stderr.buffer.write(outputs["stderr"])
-sys.stdout.flush()
-sys.stderr.flush()
 raise SystemExit(status if status >= 0 else 128 - status)

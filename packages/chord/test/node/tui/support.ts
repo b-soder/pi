@@ -12,6 +12,7 @@ import { testApp } from "../app/support.ts";
 const MAIN = fileURLToPath(new URL("../fixtures/tui/main.ts", import.meta.url));
 const DRIVE = fileURLToPath(new URL("../fixtures/tui/drive.ts", import.meta.url));
 const ESCAPES = fileURLToPath(new URL("../fixtures/tui/escapes.ts", import.meta.url));
+const PTY_DRIVER = fileURLToPath(new URL("./pty-driver.py", import.meta.url));
 
 /** A Node binary of 26.5.1 or later, or `undefined`. */
 export const TUI_NODE = findNode();
@@ -69,16 +70,19 @@ export class Launched {
 
 	constructor(args: readonly string[], terminal: "pipes" | "pty" = "pipes") {
 		const command = [TUI_NODE!, "--no-warnings", DRIVE, ...args];
-		this.child =
-			terminal === "pipes"
-				? spawn(command[0]!, command.slice(1), { stdio: ["pipe", "pipe", "pipe"] })
-				: spawn(
-						"script",
-						["-qefc", command.map((arg) => `'${arg.replaceAll("'", "'\\''")}'`).join(" "), "/dev/null"],
-						{
-							stdio: ["pipe", "pipe", "pipe"],
-						},
-					);
+		if (terminal === "pipes") {
+			this.child = spawn(command[0]!, command.slice(1), { stdio: ["pipe", "pipe", "pipe"] });
+		} else if (process.platform === "darwin") {
+			this.child = spawn("/usr/bin/python3", [PTY_DRIVER, "script", "-q", "-e", "/dev/null", ...command], {
+				stdio: ["pipe", "pipe", "pipe"],
+			});
+		} else {
+			this.child = spawn(
+				"script",
+				["-qefc", command.map((arg) => `'${arg.replaceAll("'", "'\\''")}'`).join(" "), "/dev/null"],
+				{ stdio: ["pipe", "pipe", "pipe"] },
+			);
+		}
 		this.child.stdout!.on("data", (chunk: Buffer) => {
 			this.output += chunk.toString();
 		});
