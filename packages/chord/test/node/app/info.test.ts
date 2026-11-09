@@ -1,6 +1,7 @@
 // Tests of the start-data objects (slice 13 §1): `AppInfo` on the server (data directory, app name, newest API
 // version) and `WorkerInfo` on a worker (its address and the start data `start` made for it), as plugins get them.
 
+import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { BACKGROUND_CONTEXT as context } from "../../../src/context/index.ts";
@@ -37,7 +38,11 @@ describe("start data", () => {
 			},
 		});
 		const info = await app.host.get(AppInfo, {}, context);
-		expect([info.dataDir.value, info.name.value, info.version.value]).toEqual([dataDir, "chord-test", "v2"]);
+		expect([info.dataDir.value, info.name.value, info.version.value]).toEqual([
+			await realpath(dataDir),
+			"chord-test",
+			"v2",
+		]);
 		info.release();
 		await app.close(context);
 	});
