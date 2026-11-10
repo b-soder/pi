@@ -192,7 +192,6 @@ describe("builtin providers", () => {
 			["openrouter", "openai/gpt-5.6-terra"],
 		] as const;
 		const unsupported = [
-			["fireworks", "accounts/fireworks/models/nemotron-3-ultra-nvfp4"],
 			["openai", "gpt-4.1"],
 			["openai", "gpt-5.2"],
 			["anthropic", "claude-sonnet-4-5"],
@@ -205,6 +204,12 @@ describe("builtin providers", () => {
 			["openrouter", "moonshotai/kimi-k3"],
 			["openrouter", "openai/gpt-5.6-terra:batch"],
 		] as const;
+		// Fireworks Messages models have no verified mid-conversation system-message support.
+		const fireworksMessages = getBuiltinModels("fireworks").filter((model) => model.api === "anthropic-messages");
+		expect(fireworksMessages.length).toBeGreaterThan(0);
+		for (const model of fireworksMessages) {
+			expect(model.compat, model.id).not.toHaveProperty("supportsMidConvoSystemMessages");
+		}
 		for (const [provider, modelId] of supported) {
 			expect(models.getModel(provider, modelId), `${provider}/${modelId}`).toHaveProperty(
 				"compat.supportsMidConvoSystemMessages",
