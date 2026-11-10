@@ -2125,7 +2125,15 @@ Order: the server, then every running worker by the same rules, then the clients
   user) and flags changes of base code (the app restarts its hosts); a build is per plugin (a failed one keeps its old code); `rollout` runs the app's
   steps in order (server, workers, clients; decision "Slice 7b's open points" (3)). A reload control (a button, a CLI,
   an agent tool) is the app's. One base bundle per surface (host packages and the app runtime) is an app's startup
-  optimization, the web's in slice 11.
+  optimization, the web's in slice 11. Native directory events are supplemented by finite, best-effort metadata
+  reconciliation from pre-registration snapshots after Chord's own watch registrations and topology changes
+  (`native-watch-reconciliation.md`, owner option A, 2026-11-10). Four bounded passes target 0, 250 ms, 1 s and 3 s,
+  then stop without idle polling. This can recover persistent edits lost during registration, but cannot guarantee
+  recovery when unrelated watchers rebuild the shared FSEvents stream outside the window. Reconciliation only marks
+  through the same generation fences; it never applies. Directory identity/type is checked before traversal and
+  between scan turns; replacements are marked, never followed. Reconciliation limits or scan errors skip only that
+  directory's reconciliation and report a diagnostic, never disable native watching. Base-only directories count
+  and stat only tracked base files. Native-watch failures retain their separate existing fallback.
 - Project plugins, trust, snapshots, scopes and npm/git package installs: `apps/p2/docs/plugin-loading.md` (still the
   reference for those; not in 7c).
 
