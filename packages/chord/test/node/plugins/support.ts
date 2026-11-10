@@ -2,9 +2,11 @@
 // packages and local bare git repositories written there (no network), and the host packages the fixtures import.
 
 import { execFileSync } from "node:child_process";
+import { type FSWatcher, watch } from "node:fs";
 import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach } from "vitest";
 import * as chord from "../../../src/index.ts";
@@ -30,10 +32,38 @@ export function kindsOf(modules: HostPackages): Readonly<Record<string, KindDefi
 }
 
 const made: string[] = [];
+const barriers: FSWatcher[] = [];
 
 afterEach(async () => {
+	for (const watcher of barriers.splice(0)) watcher.close();
 	for (const dir of made.splice(0)) await rm(dir, { recursive: true, force: true });
 });
+
+/** Waits for the macOS loop's shared FSEvents stream to observe a separate, assertion-free probe directory. */
+export async function nativeWatchReady(): Promise<void> {
+	if (process.platform !== "darwin") return;
+	// libuv registers all directory handles on this loop asynchronously in one SinceNow stream. Returning from
+	// fs.watch is not readiness. Keep this handle until teardown: closing it would rebuild the stream again.
+	const dir = await mkdtemp(join(tmpdir(), "chord-watch-barrier-"));
+	made.push(dir);
+	let observed = false;
+	let failure: Error | undefined;
+	const watcher = watch(dir, (_event, file) => {
+		// Only this handle's exact probe name can establish readiness; no event enters PluginWatcher.mark.
+		if (file === "ready") observed = true;
+	});
+	barriers.push(watcher);
+	watcher.on("error", (error) => {
+		failure = error;
+	});
+	const deadline = performance.now() + 2_000;
+	for (let generation = 0; !observed; generation++) {
+		if (failure !== undefined) throw new Error("Native watch readiness barrier failed", { cause: failure });
+		if (performance.now() >= deadline) throw new Error("Native watch readiness barrier timed out (no probe event)");
+		await writeFile(join(dir, "ready"), String(generation));
+		await delay(20);
+	}
+}
 
 /** A temporary directory removed after the test; `fixtures` (names of fixture plugins) copied into it. */
 export async function tempRoot(fixtures: readonly string[] = []): Promise<string> {

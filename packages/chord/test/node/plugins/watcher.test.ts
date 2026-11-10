@@ -11,7 +11,7 @@ import { type BuiltFacet, discoverPlugins } from "../../../src/node/plugins/inde
 import { type PluginsState, PluginWatcher } from "../../../src/node/plugins/watcher.ts";
 import { Batch } from "../../../src/state/internal.ts";
 import { changesOf, delivered } from "../../support.ts";
-import { KINDS, tempRoot, writeFiles, writePlugin } from "./support.ts";
+import { KINDS, nativeWatchReady, tempRoot, writeFiles, writePlugin } from "./support.ts";
 
 type MarkObserver = { calls: { path: string; kind: "native" | "manual" }[]; manual: boolean; base: string };
 
@@ -21,6 +21,8 @@ async function watched(observer?: MarkObserver) {
 	const base = await realpath(await tempRoot());
 	await writePlugin(root, "a", "@test/a", { "worker.ts": "", "own.ts": "" });
 	await writePlugin(root, "b", "@test/b", { "server.ts": "" });
+	// Put fixture writes before the native stream's boundary, rather than racing their journal delivery.
+	await nativeWatchReady();
 	const failures: unknown[] = [];
 	const watcher = new PluginWatcher(
 		{ roots: [root], base: [base], kinds: KINDS, failed: (error) => failures.push(error) },
@@ -175,6 +177,39 @@ function applyAndMark(watcher: PluginWatcher, observer: MarkObserver, target: st
 }
 
 describe("the watcher's marks", () => {
+	it("never attributes readiness barrier events to plugin or base marks", async () => {
+		const root = await realpath(await tempRoot());
+		const base = await realpath(await tempRoot());
+		await nativeWatchReady();
+		const watcher = new PluginWatcher(
+			{
+				roots: [root],
+				base: [base],
+				kinds: KINDS,
+				failed: (error) => {
+					throw error;
+				},
+			},
+			new Batch(() => {}, undefined),
+		);
+		const marks = vi.spyOn(watcher, "mark");
+		try {
+			await nativeWatchReady();
+			await nativeWatchReady();
+			expect(marks.mock.calls.some(([path]) => path.includes("chord-watch-barrier-"))).toBe(false);
+			expect(marks).not.toHaveBeenCalled();
+			expect(watcher.value).toEqual({ dirty: [], install: [], set: false, base: false });
+			// The independent real event is still required, and is attributed to its exact path.
+			const target = join(root, "barrier-guard.ts");
+			await writeFile(target, "export {};");
+			await vi.waitFor(() => expect(marks).toHaveBeenCalledWith(target), { timeout: 5_000 });
+			expect(watcher.value).toMatchObject({ set: true, base: false });
+		} finally {
+			marks.mockRestore();
+			watcher.close();
+		}
+	});
+
 	it("dirties every plugin whose facets used a changed file, and the plugin whose directory contains it", async () => {
 		const { root, watcher } = await watched();
 		watcher.mark(join(root, "contracts", "contract.ts"));
@@ -222,6 +257,7 @@ describe("the watcher's marks", () => {
 		watcher.mark(join(elsewhere, "node_modules", "react", "index.js"));
 		expect(watcher.value).toMatchObject({ base: false });
 		// A real event on the file: its directory is watched.
+		await nativeWatchReady();
 		await writeFile(join(elsewhere, "entry.ts"), "export {};");
 		await vi.waitFor(() => expect(watcher.value).toMatchObject({ base: true }), { timeout: 5_000 });
 		expect(base).not.toBe(elsewhere);
@@ -284,6 +320,7 @@ describe("the watcher's marks", () => {
 		expect(watcher.value).toEqual({ dirty: [], install: [], set: false, base: false });
 		expect(watcher.value).toMatchObject({ dirty: expect.not.arrayContaining(["@test/a"]) });
 		const target = join(root, "a", "node_modules-free.ts");
+		await nativeWatchReady();
 		const start = observer.calls.length;
 		stage = "native-event-write";
 		await writeFile(target, "export {};");
@@ -318,6 +355,7 @@ describe("the watcher and single-file plugins (slice 12 §4)", () => {
 		const paths = [server, web];
 		expect(watcher.value).toMatchObject({ dirty: expect.not.arrayContaining(["hello"]) });
 		explainMarks(root, watcher, observer, server, [], paths);
+		await nativeWatchReady();
 		let start = observer.calls.length;
 		await writeFiles(root, { "hello.server.ts": "" });
 		await vi.waitFor(
@@ -445,6 +483,7 @@ describe("the watcher, fix round 1", () => {
 		const extra = [dir, join(dir, "lib"), second];
 		expect(watcher.value).toMatchObject({ dirty: expect.not.arrayContaining(["@test/a"]) });
 		explainMarks(root, watcher, observer, first, extra);
+		await nativeWatchReady();
 		const start = observer.calls.length;
 		await writeFiles(dir, { "first.ts": "" });
 		await vi.waitFor(
@@ -460,6 +499,7 @@ describe("the watcher, fix round 1", () => {
 		watcher.applied(["@test/a"], firstBuild);
 		expect(watcher.value).toEqual({ ...beforeFirst, dirty: beforeFirst.dirty.filter((name) => name !== "@test/a") });
 		explainMarks(root, watcher, observer, first, extra);
+		await nativeWatchReady();
 		const secondStart = observer.calls.length;
 		await writeFile(second, "export {};");
 		await vi.waitFor(
@@ -491,6 +531,7 @@ describe("the watcher and links", () => {
 		const target = join(root, "a", "loop");
 		expect(watcher.value).toMatchObject({ dirty: expect.not.arrayContaining(["@test/a"]) });
 		explainMarks(root, watcher, observer, target, []);
+		await nativeWatchReady();
 		const start = observer.calls.length;
 		await symlink("loop", target);
 		await vi.waitFor(

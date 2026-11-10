@@ -31,7 +31,16 @@ import {
 	transported,
 	valuesOf,
 } from "../../support.ts";
-import { gitRepository, HOST_PACKAGES, kindsOf, tempRoot, writeFiles, writePackage, writePlugin } from "./support.ts";
+import {
+	gitRepository,
+	HOST_PACKAGES,
+	kindsOf,
+	nativeWatchReady,
+	tempRoot,
+	writeFiles,
+	writePackage,
+	writePlugin,
+} from "./support.ts";
 
 /** The fixtures' contracts, as the `contracts` fixture declares them. */
 const Worker = hostKind("test.worker");
@@ -139,6 +148,7 @@ describe("per plugin at reload", () => {
 		const label = async (dir: string) =>
 			(await host.get(local(`test.${dir}`, { version: 1, params: {}, members: { label: str() } }), {}, context))
 				.label.value;
+		await nativeWatchReady();
 		return { root, plugins, host, label };
 	}
 
@@ -258,6 +268,7 @@ describe("rollout", () => {
 		await itemPlugin(root, "b", "b1");
 		const { plugins } = component(root);
 		await plugins.build([], context);
+		await nativeWatchReady();
 		await writeFile(join(root, "a", "worker.ts"), "// a\n");
 		await writeFile(join(root, "b", "worker.ts"), "// b\n");
 		await vi.waitFor(
@@ -291,6 +302,7 @@ describe("rollout", () => {
 		await itemPlugin(root, "b", "b1");
 		const { plugins } = component(root);
 		await plugins.build([], context);
+		await nativeWatchReady();
 		await writeFile(join(root, "a", "worker.ts"), "// a\n");
 		await vi.waitFor(() => expect(plugins.state.value.dirty).toContain("@test/a"), { timeout: 5_000 });
 		const stopped: RolloutHost[] = [{ host: "session|S1", stopped: true }];
@@ -326,6 +338,7 @@ describe("rollout", () => {
 		await writePlugin(root, "a", "@test/a", { "worker.ts": "export default { setup: () => {} };", "server.ts": "" });
 		const { plugins } = component(root);
 		await plugins.build([], context);
+		await nativeWatchReady();
 		await writeFile(join(root, "a", "worker.ts"), "export default { setup: () => {} }; // edited\n");
 		await vi.waitFor(() => expect(plugins.state.value.dirty).toContain("@test/a"), { timeout: 5_000 });
 		const built = await plugins.build(["@test/a"], context);
@@ -357,6 +370,7 @@ describe("rollout", () => {
 		await itemPlugin(root, "a", "a1");
 		const { plugins } = component(root);
 		await plugins.build([], context);
+		await nativeWatchReady();
 		await writeFile(join(root, "a", "worker.ts"), "// 1\n");
 		await vi.waitFor(() => expect(plugins.state.value.dirty).toContain("@test/a"), { timeout: 5_000 });
 		const built = await plugins.build(["@test/a"], context);
@@ -432,6 +446,7 @@ describe("installs through the component", () => {
 			context,
 		);
 		await plugins.build([], context);
+		await nativeWatchReady();
 		await writeFile(
 			join(root, "a", "package.json"),
 			JSON.stringify({ name: "@test/a", type: "module", dependencies: {} }),
@@ -549,6 +564,7 @@ describe("plugins whose files move, and removed plugins (slice 12 fix round 2, S
 			await plugins.load(host, { kind: "worker", core: [], modules: HOST_PACKAGES }, context);
 			const Hello = local("test.hello", { version: 1, params: {}, members: { label: str() } });
 			expect((await host.get(Hello, {}, context)).label.value).toBe("from a file");
+			await nativeWatchReady();
 			await writePlugin(root, "hello", "hello", { "worker.ts": facet("from a directory") });
 			await vi.waitFor(() => expect(plugins.state.value).toMatchObject({ set: true }), { timeout: 5_000 });
 			const built = await plugins.build([], context);
@@ -574,6 +590,7 @@ describe("plugins whose files move, and removed plugins (slice 12 fix round 2, S
 		stage = "initial-build";
 		await plugins.build(["@test/user"], context);
 		stage = "remove-plugin";
+		await nativeWatchReady();
 		await rm(join(root, "user"), { recursive: true });
 		stage = "removal-mark-wait";
 		await vi.waitFor(() => expect(plugins.state.value).toMatchObject({ set: true }), { timeout: 5_000 });
@@ -583,6 +600,7 @@ describe("plugins whose files move, and removed plugins (slice 12 fix round 2, S
 		expect(plugins.state.value.dirty).not.toContain("@test/user");
 		// This native-event flow is a smoke; the watcher unit deterministically proves removed read ownership.
 		stage = "native-source-write";
+		await nativeWatchReady();
 		await writeFile(join(root, "contracts", "contract.ts"), "export const c = 2;");
 		stage = "native-mark-wait";
 		await vi.waitFor(() => expect(plugins.state.value.dirty).toContain("@test/contracts"), { timeout: 5_000 });
@@ -650,6 +668,7 @@ describe("end to end: a server and a worker", () => {
 		await notes.add(context);
 		const frames = changesOf(await notes.label.watch(context));
 		const steps = [plugins.step("server", server as Host<P>), plugins.step("worker", worker as Host<P>)];
+		await nativeWatchReady();
 
 		await writeFile(join(root, "notes", "label.ts"), 'export const label = "v2";\n');
 		await vi.waitFor(() => expect(plugins.state.value.dirty).toContain("@test/notes"), { timeout: 5_000 });
@@ -726,6 +745,7 @@ describe("fix round 1", () => {
 		await plugins.load(host, { kind: "worker", core: [], modules: HOST_PACKAGES }, context);
 		await itemPlugin(root, "a", "a2");
 		const first = await plugins.build(["@test/a"], context);
+		await nativeWatchReady();
 		await rm(join(root, "b"), { recursive: true });
 		await vi.waitFor(() => expect(plugins.state.value).toMatchObject({ set: true }), { timeout: 5_000 });
 		const later = await plugins.build([], context);
@@ -780,6 +800,7 @@ describe("fix round 1", () => {
 		const host = createHost({ onError: () => {} });
 		await plugins.load(host, { kind: "worker", core: [], modules: HOST_PACKAGES }, context);
 		// The plugin keeps a server facet only.
+		await nativeWatchReady();
 		await rm(join(root, "a", "worker.ts"));
 		await writeFiles(join(root, "a"), {
 			"server.ts": 'import { defineFacet } from "@earendil-works/chord";\nexport default defineFacet(() => {});',
@@ -803,6 +824,7 @@ describe("fix round 1", () => {
 		const host = createHost({ onError: () => {} });
 		await plugins.load(host, { kind: "worker", core: [], modules: HOST_PACKAGES }, context);
 		const item = await host.get(local("test.a", { version: 1, params: {}, members: { label: str() } }), {}, context);
+		await nativeWatchReady();
 		await itemPlugin(root, "a", "a2");
 		await vi.waitFor(() => expect(plugins.state.value.dirty).toContain("@test/a"), { timeout: 5_000 });
 		const built = await plugins.build(["@test/a"], context);
@@ -843,6 +865,7 @@ describe("fix round 1", () => {
 		stage = "initialbuild";
 		expect((await plugins.build([], context)).facets.map(({ kind }) => kind)).toEqual(["script"]);
 		stage = "manifestwrite";
+		await nativeWatchReady();
 		await writeFiles(dir, {
 			"package.json": JSON.stringify({ name: "@test/a", type: "module", dependencies: { "new-dep": "1.0.0" } }),
 		});
