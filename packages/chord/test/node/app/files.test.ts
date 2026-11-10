@@ -453,7 +453,8 @@ describe("chunked uploads", () => {
 
 	it("caps the uploads under way per object: past it begin is refused busy; an ending one frees its slot (recheck N1)", async () => {
 		const files = await filesOf({ limits: { uploads: 3 } });
-		const fds = async () => (await readdir("/proc/self/fd")).length;
+		const fdDirectory = process.platform === "darwin" ? "/dev/fd" : "/proc/self/fd";
+		const fds = async () => (await readdir(fdDirectory)).length;
 		const before = await fds();
 		const begun: string[] = [];
 		const write = (index: number) => ({ space: "shared", path: `u${index}`, mime: "x", source: "test" });

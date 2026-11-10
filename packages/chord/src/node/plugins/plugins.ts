@@ -298,7 +298,7 @@ class PluginsComponent implements Plugins {
 	}
 
 	async installDependencies(name: string, context: Context): Promise<void> {
-		if (!this.#discovered) await this.#discover(context);
+		if (!this.#discovered || this.#watcher.needsDiscovery) await this.#discover(context);
 		const plugin = this.#discovery.plugins.find((each) => each.name === name);
 		if (plugin === undefined) throw new Error(`plugins.installDependencies: no plugin "${name}"`);
 		await installDependencies(plugin, context, this.#options.install);

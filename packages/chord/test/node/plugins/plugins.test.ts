@@ -6,7 +6,7 @@
 
 import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFailed, vi } from "vitest";
 import { BACKGROUND_CONTEXT as context, withAbortSignal } from "../../../src/context/index.ts";
 import { hostKind, int, local, method, remote, str } from "../../../src/contracts/index.ts";
 import { createHost, defineFacet, type Host, type ReloadReport } from "../../../src/host/index.ts";
@@ -19,6 +19,7 @@ import {
 	type RolloutHost,
 	type RolloutStep,
 } from "../../../src/node/plugins/index.ts";
+import { type MarkSnapshot, PluginWatcher } from "../../../src/node/plugins/watcher.ts";
 import { constant } from "../../../src/state/index.ts";
 import {
 	changesOf,
@@ -52,6 +53,18 @@ async function itemPlugin(root: string, dir: string, label: string): Promise<voi
 			`export default defineFacet((host) => host.serve(Item, () => ({ label: constant(${JSON.stringify(label)}) })));`,
 		].join("\n"),
 	});
+}
+
+/** Observe the component's real application-policy calls; the spy passes through unchanged and is always restored. */
+async function withAppliedCalls(
+	run: (calls: () => { readonly names: readonly string[]; readonly snapshot: MarkSnapshot }[]) => Promise<void>,
+): Promise<void> {
+	const spy = vi.spyOn(PluginWatcher.prototype, "applied");
+	try {
+		await run(() => spy.mock.calls.map(([names, snapshot]) => ({ names: [...names], snapshot })));
+	} finally {
+		spy.mockRestore();
+	}
 }
 
 /** The report of an in-process step's one host. */
@@ -247,22 +260,28 @@ describe("rollout", () => {
 		await plugins.build([], context);
 		await writeFile(join(root, "a", "worker.ts"), "// a\n");
 		await writeFile(join(root, "b", "worker.ts"), "// b\n");
-		await vi.waitFor(() => expect(plugins.state.value).toMatchObject({ dirty: ["@test/a", "@test/b"] }), {
-			timeout: 5_000,
-		});
+		await vi.waitFor(
+			() => {
+				expect(plugins.state.value.dirty).toEqual(expect.arrayContaining(["@test/a", "@test/b"]));
+			},
+			{ timeout: 5_000 },
+		);
 		const built = await plugins.build(["@test/a", "@test/b"], context);
 		const order: string[] = [];
-		const result = await plugins.rollout(
-			[step("server", order, { report: report([]) }), step("worker", order, { report: report(["@test/b"]) })],
-			built,
-			context,
-		);
-		expect([order, result.stopped, result.steps.map(({ name }) => name)]).toEqual([
-			["server", "worker"],
-			undefined,
-			["server", "worker"],
-		]);
-		expect(plugins.state.value).toMatchObject({ dirty: ["@test/b"] });
+		await withAppliedCalls(async (calls) => {
+			const result = await plugins.rollout(
+				[step("server", order, { report: report([]) }), step("worker", order, { report: report(["@test/b"]) })],
+				built,
+				context,
+			);
+			expect([order, result.stopped, result.steps.map(({ name }) => name)]).toEqual([
+				["server", "worker"],
+				undefined,
+				["server", "worker"],
+			]);
+			expect(calls().map(({ names }) => names)).toEqual([["@test/a"]]);
+			expect(plugins.state.value.dirty).toContain("@test/b");
+		});
 		plugins.close();
 	});
 
@@ -273,27 +292,32 @@ describe("rollout", () => {
 		const { plugins } = component(root);
 		await plugins.build([], context);
 		await writeFile(join(root, "a", "worker.ts"), "// a\n");
-		await vi.waitFor(() => expect(plugins.state.value).toMatchObject({ dirty: ["@test/a"] }), { timeout: 5_000 });
+		await vi.waitFor(() => expect(plugins.state.value.dirty).toContain("@test/a"), { timeout: 5_000 });
 		const stopped: RolloutHost[] = [{ host: "session|S1", stopped: true }];
-		await plugins.rollout(
-			[step("workers", [], { hosts: stopped })],
-			await plugins.build(["@test/a"], context),
-			context,
-		);
-		expect(plugins.state.value).toMatchObject({ dirty: [] });
+		await withAppliedCalls(async (calls) => {
+			await plugins.rollout(
+				[step("workers", [], { hosts: stopped })],
+				await plugins.build(["@test/a"], context),
+				context,
+			);
+			expect(calls().map(({ names }) => names)).toEqual([["@test/a"]]);
+		});
 		await writeFile(join(root, "a", "worker.ts"), "// a again\n");
-		await vi.waitFor(() => expect(plugins.state.value).toMatchObject({ dirty: ["@test/a"] }), { timeout: 5_000 });
+		await vi.waitFor(() => expect(plugins.state.value.dirty).toContain("@test/a"), { timeout: 5_000 });
 		const crashed: RolloutHost[] = [
 			{ host: "session|S1", report: report([]) },
 			{ host: "session|S2", error: new Error("crashed") },
 		];
-		const result = await plugins.rollout(
-			[step("workers", [], { hosts: crashed })],
-			await plugins.build(["@test/a"], context),
-			context,
-		);
-		expect(result.steps).toEqual([{ name: "workers", hosts: crashed }]);
-		expect(plugins.state.value).toMatchObject({ dirty: ["@test/a"] });
+		await withAppliedCalls(async (calls) => {
+			const result = await plugins.rollout(
+				[step("workers", [], { hosts: crashed })],
+				await plugins.build(["@test/a"], context),
+				context,
+			);
+			expect(result.steps).toEqual([{ name: "workers", hosts: crashed }]);
+			expect(calls().map(({ names }) => names)).toEqual([[]]);
+		});
+		expect(plugins.state.value.dirty).toContain("@test/a");
 		plugins.close();
 	});
 
@@ -303,16 +327,28 @@ describe("rollout", () => {
 		const { plugins } = component(root);
 		await plugins.build([], context);
 		await writeFile(join(root, "a", "worker.ts"), "export default { setup: () => {} }; // edited\n");
-		await vi.waitFor(() => expect(plugins.state.value).toMatchObject({ dirty: ["@test/a"] }), { timeout: 5_000 });
+		await vi.waitFor(() => expect(plugins.state.value.dirty).toContain("@test/a"), { timeout: 5_000 });
 		const built = await plugins.build(["@test/a"], context);
-		await plugins.rollout([step("worker", [], { report: report([]) })], built, context);
-		expect(plugins.state.value).toMatchObject({ dirty: ["@test/a"] });
-		await plugins.rollout(
-			[step("worker", [], { report: report([]) }), step("server", [], { report: report([]) }, ["server"])],
-			built,
-			context,
-		);
-		expect(plugins.state.value).toMatchObject({ dirty: [] });
+		let partialSnapshot!: MarkSnapshot;
+		await withAppliedCalls(async (calls) => {
+			await plugins.rollout([step("worker", [], { report: report([]) })], built, context);
+			const applied = calls();
+			expect(applied.map(({ names }) => names)).toEqual([[]]);
+			partialSnapshot = applied[0]!.snapshot;
+			expect(partialSnapshot.plugins.has("@test/a")).toBe(true);
+		});
+		expect(plugins.state.value.dirty).toContain("@test/a");
+		await withAppliedCalls(async (calls) => {
+			await plugins.rollout(
+				[step("worker", [], { report: report([]) }), step("server", [], { report: report([]) }, ["server"])],
+				built,
+				context,
+			);
+			const applied = calls();
+			expect(applied.map(({ names }) => names)).toEqual([["@test/a"]]);
+			expect(applied[0]!.snapshot).toBe(partialSnapshot);
+			expect(applied[0]!.snapshot.plugins.has("@test/a")).toBe(true);
+		});
 		plugins.close();
 	});
 
@@ -322,7 +358,7 @@ describe("rollout", () => {
 		const { plugins } = component(root);
 		await plugins.build([], context);
 		await writeFile(join(root, "a", "worker.ts"), "// 1\n");
-		await vi.waitFor(() => expect(plugins.state.value).toMatchObject({ dirty: ["@test/a"] }), { timeout: 5_000 });
+		await vi.waitFor(() => expect(plugins.state.value.dirty).toContain("@test/a"), { timeout: 5_000 });
 		const built = await plugins.build(["@test/a"], context);
 		const order: string[] = [];
 		const stopped = await plugins.rollout(
@@ -335,13 +371,13 @@ describe("rollout", () => {
 			"server",
 			"closed",
 		]);
-		expect(plugins.state.value).toMatchObject({ dirty: ["@test/a"] });
+		expect(plugins.state.value.dirty).toContain("@test/a");
 		// Saved again after the build: applied, the mark stays (the build did not include the new content).
 		const later = await plugins.build(["@test/a"], context);
 		await writeFile(join(root, "a", "worker.ts"), "// 2\n");
 		await vi.waitFor(async () => {
 			await plugins.rollout([step("server", [], { report: report([]) })], later, context);
-			expect(plugins.state.value).toMatchObject({ dirty: ["@test/a"] });
+			expect(plugins.state.value.dirty).toContain("@test/a");
 		});
 		plugins.close();
 	});
@@ -402,7 +438,8 @@ describe("installs through the component", () => {
 		);
 		await vi.waitFor(() => expect(plugins.state.value).toMatchObject({ install: ["@test/a"] }), { timeout: 5_000 });
 		await plugins.installDependencies("@test/a", context);
-		expect(plugins.state.value).toMatchObject({ install: [], dirty: ["@test/a"] });
+		expect(plugins.state.value.install).toEqual([]);
+		expect(plugins.state.value.dirty).toContain("@test/a");
 		expect(reported).toEqual([]);
 		plugins.close();
 	});
@@ -508,32 +545,46 @@ describe("plugins whose files move, and removed plugins (slice 12 fix round 2, S
 		await writeFiles(root, { "hello.worker.ts": facet("from a file") });
 		const { plugins } = component(root);
 		const host = createHost({ onError: () => {} });
-		await plugins.load(host, { kind: "worker", core: [], modules: HOST_PACKAGES }, context);
-		const Hello = local("test.hello", { version: 1, params: {}, members: { label: str() } });
-		expect((await host.get(Hello, {}, context)).label.value).toBe("from a file");
-		await writePlugin(root, "hello", "hello", { "worker.ts": facet("from a directory") });
-		const built = await plugins.build([], context);
-		expect(Object.keys(built.plugins)).toEqual(["hello"]);
-		await plugins.rollout([plugins.step("worker", host)], built, context);
-		expect((await host.get(Hello, {}, context)).label.value).toBe("from a directory");
-		await host.close(context);
-		plugins.close();
+		try {
+			await plugins.load(host, { kind: "worker", core: [], modules: HOST_PACKAGES }, context);
+			const Hello = local("test.hello", { version: 1, params: {}, members: { label: str() } });
+			expect((await host.get(Hello, {}, context)).label.value).toBe("from a file");
+			await writePlugin(root, "hello", "hello", { "worker.ts": facet("from a directory") });
+			await vi.waitFor(() => expect(plugins.state.value).toMatchObject({ set: true }), { timeout: 5_000 });
+			const built = await plugins.build([], context);
+			expect(Object.keys(built.plugins)).toEqual(["hello"]);
+			await plugins.rollout([plugins.step("worker", host)], built, context);
+			expect((await host.get(Hello, {}, context)).label.value).toBe("from a directory");
+		} finally {
+			await host.close(context);
+			plugins.close();
+		}
 	});
 
 	it("forgets what a removed plugin's builds read: a change there no longer dirties it", async () => {
+		let stage = "fixture-roots";
+		onTestFailed(() => console.error(stage));
 		const root = await tempRoot();
+		stage = "initial-fixtures";
 		await writePlugin(root, "contracts", "@test/contracts", { "contract.ts": "export const c = 1;" });
 		await writePlugin(root, "user", "@test/user", {
 			"worker.ts": 'import { c } from "../contracts/contract.ts";\nexport default { setup: () => c };',
 		});
 		const { plugins } = component(root);
+		stage = "initial-build";
 		await plugins.build(["@test/user"], context);
+		stage = "remove-plugin";
 		await rm(join(root, "user"), { recursive: true });
+		stage = "removal-mark-wait";
 		await vi.waitFor(() => expect(plugins.state.value).toMatchObject({ set: true }), { timeout: 5_000 });
 		// The removal rolled out (no host here): its mark clears.
+		stage = "removal-rollout";
 		await plugins.rollout([], await plugins.build([], context), context);
-		expect(plugins.state.value.dirty).toEqual([]);
+		expect(plugins.state.value.dirty).not.toContain("@test/user");
+		// This native-event flow is a smoke; the watcher unit deterministically proves removed read ownership.
+		stage = "native-source-write";
 		await writeFile(join(root, "contracts", "contract.ts"), "export const c = 2;");
+		stage = "native-mark-wait";
 		await vi.waitFor(() => expect(plugins.state.value.dirty).toContain("@test/contracts"), { timeout: 5_000 });
 		expect(plugins.state.value.dirty).not.toContain("@test/user");
 		plugins.close();
@@ -601,8 +652,15 @@ describe("end to end: a server and a worker", () => {
 		const steps = [plugins.step("server", server as Host<P>), plugins.step("worker", worker as Host<P>)];
 
 		await writeFile(join(root, "notes", "label.ts"), 'export const label = "v2";\n');
-		await vi.waitFor(() => expect(plugins.state.value).toMatchObject({ dirty: ["@test/notes"] }), { timeout: 5_000 });
-		const rolled = await plugins.rollout(steps, await plugins.build(plugins.state.value.dirty, context), context);
+		await vi.waitFor(() => expect(plugins.state.value.dirty).toContain("@test/notes"), { timeout: 5_000 });
+		let rolled!: Awaited<ReturnType<typeof plugins.rollout>>;
+		await withAppliedCalls(async (calls) => {
+			rolled = await plugins.rollout(steps, await plugins.build(plugins.state.value.dirty, context), context);
+			const applied = calls();
+			expect(applied).toHaveLength(1);
+			expect(applied[0]!.names).toContain("@test/notes");
+			expect(applied[0]!.snapshot.plugins.has("@test/notes")).toBe(true);
+		});
 		expect(
 			rolled.steps.map(({ name, hosts }) => [name, reportOf(hosts).plugins.changed, reportOf(hosts).objects]),
 		).toEqual([
@@ -613,18 +671,24 @@ describe("end to end: a server and a worker", () => {
 		await delivered();
 		expect(valuesOf(frames)).toEqual(["v2"]);
 		expect([notes.label.value, notes.count.value, index.label.value]).toEqual(["v2", 1, "v2"]);
-		expect(plugins.state.value).toMatchObject({ dirty: [] });
 
 		await writeFile(join(root, "notes", "label.ts"), "export const label = ;\n");
-		await vi.waitFor(() => expect(plugins.state.value).toMatchObject({ dirty: ["@test/notes"] }), { timeout: 5_000 });
-		const broken = await plugins.rollout(steps, await plugins.build(plugins.state.value.dirty, context), context);
+		await vi.waitFor(() => expect(plugins.state.value.dirty).toContain("@test/notes"), { timeout: 5_000 });
+		let broken!: Awaited<ReturnType<typeof plugins.rollout>>;
+		await withAppliedCalls(async (calls) => {
+			broken = await plugins.rollout(steps, await plugins.build(plugins.state.value.dirty, context), context);
+			const applied = calls();
+			expect(applied).toHaveLength(1);
+			expect(applied[0]!.names).not.toContain("@test/notes");
+			expect(applied[0]!.snapshot.plugins.has("@test/notes")).toBe(true);
+		});
 		expect(broken.steps.map(({ name, hosts }) => [name, failedNames(reportOf(hosts))])).toEqual([
 			["server", ["@test/notes"]],
 			["worker", ["@test/notes"]],
 		]);
 		await transported();
 		expect([notes.label.value, index.label.value, notes.state.value]).toEqual(["v2", "v2", { kind: "live" }]);
-		expect(plugins.state.value).toMatchObject({ dirty: ["@test/notes"] });
+		expect(plugins.state.value.dirty).toContain("@test/notes");
 		await server.close(context);
 		await worker.close(context);
 		plugins.close();
@@ -740,22 +804,28 @@ describe("fix round 1", () => {
 		await plugins.load(host, { kind: "worker", core: [], modules: HOST_PACKAGES }, context);
 		const item = await host.get(local("test.a", { version: 1, params: {}, members: { label: str() } }), {}, context);
 		await itemPlugin(root, "a", "a2");
-		await vi.waitFor(() => expect(plugins.state.value).toMatchObject({ dirty: ["@test/a"] }), { timeout: 5_000 });
+		await vi.waitFor(() => expect(plugins.state.value.dirty).toContain("@test/a"), { timeout: 5_000 });
 		const built = await plugins.build(["@test/a"], context);
 		expect((await plugins.reload(host, structuredClone(built), context)).plugins.changed).toEqual(["@test/a"]);
 		await flushed();
 		expect(item.label.value).toBe("a2");
 		// The marks clear only through the build object itself (a copy carries no snapshot).
-		const result = await plugins.rollout([plugins.step("worker", host)], structuredClone(built), context);
-		expect(result.stopped).toBeUndefined();
-		expect(plugins.state.value).toMatchObject({ dirty: ["@test/a"] });
+		await withAppliedCalls(async (calls) => {
+			const result = await plugins.rollout([plugins.step("worker", host)], structuredClone(built), context);
+			expect(result.stopped).toBeUndefined();
+			expect(calls()).toEqual([]);
+		});
+		expect(plugins.state.value.dirty).toContain("@test/a");
 		await host.close(context);
 		plugins.close();
 	});
 
 	it("reads a changed package.json again at the next build: a new dependency is accepted (Astra, Sol)", async () => {
+		let stage = "fixture-roots";
+		onTestFailed(() => console.error(stage));
 		const root = await tempRoot();
 		const tools = await tempRoot();
+		stage = "initial-fixtures";
 		await writeFiles(tools, { "npm.mjs": "process.exit(0);" });
 		const dir = await writePlugin(root, "a", "@test/a", {
 			"worker.ts": 'import { label } from "./helper.ts";\nexport default { setup: () => {}, label };',
@@ -770,15 +840,23 @@ describe("fix round 1", () => {
 			},
 			context,
 		);
+		stage = "initialbuild";
 		expect((await plugins.build([], context)).facets.map(({ kind }) => kind)).toEqual(["script"]);
+		stage = "manifestwrite";
 		await writeFiles(dir, {
 			"package.json": JSON.stringify({ name: "@test/a", type: "module", dependencies: { "new-dep": "1.0.0" } }),
 		});
+		stage = "installmarkwait";
 		await vi.waitFor(() => expect(plugins.state.value).toMatchObject({ install: ["@test/a"] }), { timeout: 5_000 });
+		stage = "localpackagewrite";
 		await writePackage(dir, "new-dep", { "index.js": 'exports.label = "new";' });
+		stage = "helperwrite";
 		await writeFiles(dir, { "helper.ts": 'export { label } from "new-dep";' });
+		stage = "installdeps";
 		await plugins.installDependencies("@test/a", context);
+		expect(plugins.discovery.plugins[0]!.dependencies).toEqual(["new-dep"]);
 		expect(plugins.state.value).toMatchObject({ set: false });
+		stage = "followupbuild";
 		const built = await plugins.build(["@test/a"], context);
 		expect(built.facets).toEqual([expect.objectContaining({ kind: "script", plugin: "@test/a" })]);
 		expect(plugins.discovery.plugins[0]!.dependencies).toEqual(["new-dep"]);

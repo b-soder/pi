@@ -251,7 +251,12 @@ describe("applying changes one after another", () => {
 });
 
 describe("base code", () => {
-	it("marks base for a change of `base`'s files and directories and of a file a worker kind's base was built from", async () => {
+	it.each([
+		{ name: "base directory file", changed: "api/v1.ts" },
+		{ name: "explicit base file", changed: "start.ts" },
+		{ name: "worker bundle shared dependency", changed: "shared.ts" },
+		{ name: "worker entry", changed: "worker.ts" },
+	])("marks base for a change of $name", async ({ changed }) => {
 		const dir = await tempDir();
 		await mkdir(join(dir, "api"));
 		await writeFile(join(dir, "api", "v1.ts"), "export {};");
@@ -259,22 +264,13 @@ describe("base code", () => {
 		await writeFile(join(dir, "worker.ts"), 'import "./shared.ts";');
 		await writeFile(join(dir, "shared.ts"), "export {};");
 		const worker = { kind: Project, entry: join(dir, "worker.ts"), start: () => null, authorize: () => true };
-		// The entry last: its change drops its import.
-		const changes = [
-			join(dir, "api", "v1.ts"),
-			join(dir, "start.ts"),
-			join(dir, "shared.ts"),
-			join(dir, "worker.ts"),
-		];
-		for (const changed of changes) {
-			const { app } = await testApp({ base: [join(dir, "api"), join(dir, "start.ts")], workers: [worker] });
-			try {
-				expect(app.plugins.state.value.base).toBe(false);
-				await writeFile(changed, "export const changed = 1;");
-				await vi.waitFor(() => expect(app.plugins.state.value.base).toBe(true), { timeout: 5_000 });
-			} finally {
-				await app.close(context);
-			}
+		const { app } = await testApp({ base: [join(dir, "api"), join(dir, "start.ts")], workers: [worker] });
+		try {
+			expect(app.plugins.state.value.base).toBe(false);
+			await writeFile(join(dir, changed), "export const changed = 1;");
+			await vi.waitFor(() => expect(app.plugins.state.value.base).toBe(true), { timeout: 5_000 });
+		} finally {
+			await app.close(context);
 		}
 	});
 });
