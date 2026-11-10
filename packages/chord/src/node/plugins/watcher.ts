@@ -14,6 +14,7 @@ import type { JsonValue } from "../../json.ts";
 import { type Batch, Source } from "../../state/internal.ts";
 import { type BuiltFacet, inside } from "./build.ts";
 import { type Discovery, FACET_EXTENSIONS, type Plugin, sameFiles } from "./discover.ts";
+import { type ReconcileSelection, WatchReconciler } from "./reconcile.ts";
 
 /** The marks: plugins to rebuild, plugins to install, whether to discover again, whether base code changed. */
 export type PluginsState = {
@@ -34,7 +35,7 @@ export type WatcherOptions = {
 	readonly roots: readonly string[];
 	readonly base: readonly string[];
 	readonly kinds: readonly string[];
-	/** The watcher cannot watch (the system's limit): reported once, after which the app builds on demand. */
+	/** Native watching failed (reported once), or a directory's best-effort reconciliation was skipped. */
 	readonly failed: (error: unknown) => void;
 };
 
@@ -47,6 +48,7 @@ const IGNORED = new Set(["node_modules", ".git"]);
  */
 export class PluginWatcher extends Source {
 	readonly #options: WatcherOptions;
+	readonly #reconciler: WatchReconciler;
 	readonly #roots: readonly string[];
 	readonly #baseDirs: readonly string[];
 	/** Base code given file by file (`baseFiles`), by real path. */
@@ -78,6 +80,16 @@ export class PluginWatcher extends Source {
 	constructor(options: WatcherOptions, batch: Batch) {
 		super(batch);
 		this.#options = options;
+		this.#reconciler = new WatchReconciler(
+			(path) => {
+				if (this.#watchers.has(dirname(path)) || this.#watchers.has(path)) this.#changedIn(path);
+				else if (this.#baseFiles.has(path)) this.mark(path);
+				else if (this.#baseWatchers.has(path)) {
+					for (const file of this.#baseFiles) if (dirname(file) === path) this.mark(file);
+				}
+			},
+			(error) => this.#options.failed(error),
+		);
 		// Events name paths under the directories as watched: by their real paths, as discovery names plugins.
 		this.#roots = options.roots.map(real);
 		this.#baseDirs = options.base.map(real);
@@ -183,12 +195,15 @@ export class PluginWatcher extends Source {
 	 * files under ignored directories are skipped.
 	 */
 	baseFiles(files: readonly string[]): void {
+		const directories = new Set<string>();
 		for (const file of files) {
 			const path = real(file);
-			if (path.split(sep).some((part) => IGNORED.has(part))) continue;
+			if (path.split(sep).some((part) => IGNORED.has(part)) || this.#baseFiles.has(path)) continue;
 			this.#baseFiles.add(path);
-			this.#watchBaseDir(dirname(path));
+			this.#reconciler.observe(dirname(path), basename(path));
+			directories.add(dirname(path));
 		}
+		for (const dir of directories) this.#watchBaseDir(dir);
 	}
 
 	/** Marks what a change of the file or directory at `path` (absolute) asks for. */
@@ -204,6 +219,7 @@ export class PluginWatcher extends Source {
 
 	/** Stops watching. */
 	close(): void {
+		this.#reconciler.close();
 		for (const watcher of [...this.#watchers.values(), ...this.#baseWatchers.values()]) watcher.close();
 		this.#watchers.clear();
 		this.#baseWatchers.clear();
@@ -243,11 +259,19 @@ export class PluginWatcher extends Source {
 
 	/** Watches directory `dir` alone (once) for base files: a change of one of them marks `base`. */
 	#watchBaseDir(dir: string): void {
-		if (this.#baseWatchers.has(dir) || this.#reported) return;
+		if (this.#reported) return;
+		if (!this.#watchers.has(dir)) {
+			this.#reconciler.add(dir, this.#baseSelection(dir));
+		}
+		if (this.#baseWatchers.has(dir)) return;
+		if (this.#reported) return;
 		let watcher: FSWatcher;
 		try {
 			watcher = watch(dir, (_event, file) => {
-				if (file !== null && this.#baseFiles.has(join(dir, file))) this.mark(join(dir, file));
+				if (file !== null && this.#baseFiles.has(join(dir, file))) {
+					this.#reconciler.observe(dir, file);
+					this.mark(join(dir, file));
+				}
 			});
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") this.#failed(error);
@@ -255,6 +279,14 @@ export class PluginWatcher extends Source {
 		}
 		watcher.on("error", (error) => this.#failed(error));
 		this.#baseWatchers.set(dir, watcher);
+		this.#reconciler.restart();
+	}
+
+	#baseSelection(dir: string): ReconcileSelection {
+		return {
+			kind: "files",
+			names: new Set([...this.#baseFiles].filter((file) => dirname(file) === dir).map((file) => basename(file))),
+		};
 	}
 
 	/** Watches the tree at `dir` (once): it and every directory under it but ignored ones; a missing one is skipped. */
@@ -273,10 +305,15 @@ export class PluginWatcher extends Source {
 	/** Watches `dir` and, walking down, every directory under it but ignored ones (each not watched yet). */
 	#watchDirs(dir: string): void {
 		if (this.#watchers.has(dir) || this.#reported) return;
+		this.#reconciler.add(dir, { kind: "tree" });
+		if (this.#reported) return;
 		let watcher: FSWatcher;
 		try {
 			watcher = watch(dir, (_event, file) => {
-				if (file !== null) this.#changedIn(join(dir, file));
+				if (file !== null) {
+					this.#reconciler.observe(dir, file);
+					this.#changedIn(join(dir, file));
+				}
 			});
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") this.#failed(error);
@@ -284,6 +321,7 @@ export class PluginWatcher extends Source {
 		}
 		watcher.on("error", (error) => this.#failed(error));
 		this.#watchers.set(dir, watcher);
+		this.#reconciler.restart();
 		let entries: Dirent[];
 		try {
 			entries = readdirSync(dir, { withFileTypes: true });
@@ -312,6 +350,10 @@ export class PluginWatcher extends Source {
 			if (watched !== dir && !inside(dir, watched)) continue;
 			watcher.close();
 			this.#watchers.delete(watched);
+			if (this.#baseWatchers.has(watched)) {
+				this.#reconciler.add(watched, this.#baseSelection(watched));
+				this.#reconciler.restart();
+			} else this.#reconciler.remove(watched);
 		}
 	}
 

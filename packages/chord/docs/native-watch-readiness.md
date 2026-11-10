@@ -66,11 +66,13 @@ and a default fork pool, with non-watch worker count based on available CPUs min
 invokes npm's workspace test runner, which runs package scripts sequentially, not concurrently. Within Chord, many
 files still run concurrently. No concurrency configuration was changed.
 
-## Production follow-up (not implemented)
+## Production follow-up
 
 Real users can miss an edit in the first moments after a directory watch starts, or while libuv rebuilds its shared
-stream. This harness fix does **not** make production `PluginWatcher` ready or lossless. Adding probe writes to user
-plugin directories is not an acceptable production substitute.
+stream. The harness fix alone does **not** make production `PluginWatcher` ready or lossless. Adding probe writes to user
+plugin directories is not an acceptable production substitute. The subsequent production fix is documented in
+[native-watch-reconciliation.md](native-watch-reconciliation.md): finite, best-effort registration-window metadata
+reconciliation, not permanent polling or a readiness claim. The investigation and validation below describe the earlier harness-only change.
 
 Investigate a production post-start reconciliation/rescan design, including new-directory registration and stream
 reconfiguration, with generation rules that preserve edits during discovery/build. Node exposes no ready event, so a

@@ -3367,6 +3367,25 @@ Questions service (`questions.md`), retry triggers and `retryOn`, revisions over
 during a rollout, start barrier. (**Superseded in part** by R25 (contributions may change; rejected are registries
 created at runtime and mutable indirection), R17 (the harness starts after the barrier) and R6 (strict compatibility).)
 
+## Native watch registration reconciliation (owner, 2026-11-10)
+
+- **Option A: finite best-effort reconciliation, not permanent polling.** Capture pre-registration metadata and
+  reconcile around Chord's own watch registrations and topology changes with four bounded passes targeting 0,
+  250 ms, 1 s and 3 s. Stop after the window, leave no idle timer, and unref active timers. This catches persistent
+  edits lost during asynchronous registration but is not a readiness guarantee: unrelated watchers can rebuild
+  libuv's shared FSEvents stream later, outside Chord's window. That recovery gap is accepted.
+- **Reconciliation is supplementary.** Limits and scan failures (including EACCES on a child) skip only the affected
+  directory's reconciliation and report a diagnostic; they must never disable native watching. Base-only directory
+  limits count only explicitly tracked base files, not unrelated siblings. Existing native-watch failure handling
+  and on-demand builds remain separate.
+- **Do not traverse replacements.** Capture the registered directory's lstat dev/ino and directory type; check them
+  before opening a scan and when resuming child work. On a symlink, missing directory or different inode, mark the
+  change and stop that directory's reconciliation without following its replacement. Node's path-based directory
+  API cannot make the check and open atomic; do not claim a sandbox or lossless journal.
+- Preserve generation fences, explicit reloads, existing tests and assertions. No probe writes or public config/API
+  additions. `native-watch-reconciliation.md` specifies costs, scheduling and deterministic tests; `design.md` §21
+  carries the current rule. This supersedes the earlier uncommitted ongoing-polling implementation.
+
 ## Open
 
 Everything else from earlier lists is decided (see the entries above and `packages/chord/docs/design.md` §26).
