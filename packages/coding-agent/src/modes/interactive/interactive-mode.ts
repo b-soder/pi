@@ -298,6 +298,9 @@ type CompactionCostNotice = {
 	usage: Usage;
 };
 
+// Presentation only: these extension records belong beside tool activity in the four-panel layout.
+const TOOL_OUTPUT_CUSTOM_TYPES = new Set(["px-interaction", "subagent_status", "subagent_result", "px-questioner-log"]);
+
 type RenderSessionItem = AgentMessage | Extract<SessionEntry, { type: "custom" | "usage" }> | CompactionCostNotice;
 
 function isCustomSessionEntry(item: RenderSessionItem): item is Extract<SessionEntry, { type: "custom" }> {
@@ -4462,6 +4465,11 @@ export class InteractiveMode {
 			return;
 		}
 
+		if (this.toolOutputEnabled && TOOL_OUTPUT_CUSTOM_TYPES.has(entry.customType)) {
+			this.addToolExecutionComponent(component);
+			return;
+		}
+
 		if (this.streamingComponent) {
 			const streamingIndex = this.chatContainer.children.indexOf(this.streamingComponent);
 			if (streamingIndex >= 0) {
@@ -4511,7 +4519,8 @@ export class InteractiveMode {
 						options?.timestamp,
 					);
 					component.setExpanded(this.toolOutputExpanded);
-					this.chatContainer.addChild(component);
+					if (TOOL_OUTPUT_CUSTOM_TYPES.has(message.customType)) this.addToolExecutionComponent(component);
+					else this.chatContainer.addChild(component);
 				}
 				break;
 			}
