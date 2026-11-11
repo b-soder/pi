@@ -17,10 +17,16 @@ import { DEFAULT_MAX_BYTES, formatSize } from "../truncate.ts";
 
 const BASH_PREVIEW_LINES = 5;
 export const BASH_UPDATE_THROTTLE_MS = 100;
+
+/** Formats a shell timeout supplied in seconds for the tool card. */
+export function formatShellTimeout(timeout: number): string {
+	return timeout % 60 === 0 ? `${timeout / 60}m` : `${timeout}s`;
+}
+
 function formatShellCall(args: { command?: string; timeout?: number } | undefined, prompt: string): string {
 	const command = str(args?.command);
-	const timeout = args?.timeout as number | undefined;
-	const timeoutSuffix = timeout ? theme.fg("muted", ` (timeout ${timeout}s)`) : "";
+	const timeout = args?.timeout;
+	const timeoutSuffix = timeout ? theme.fg("muted", ` (timeout ${formatShellTimeout(timeout)})`) : "";
 	const commandDisplay = command === null ? invalidArgText(theme) : command ? command : theme.fg("toolOutput", "...");
 	return theme.fg("toolTitle", theme.bold(`${prompt} ${commandDisplay}`)) + timeoutSuffix;
 }
