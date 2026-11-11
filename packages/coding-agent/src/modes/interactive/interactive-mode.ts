@@ -299,7 +299,13 @@ type CompactionCostNotice = {
 };
 
 // Presentation only: these extension records belong beside tool activity in the four-panel layout.
-const TOOL_OUTPUT_CUSTOM_TYPES = new Set(["px-interaction", "subagent_status", "subagent_result", "px-questioner-log"]);
+const TOOL_OUTPUT_CUSTOM_TYPES = new Set([
+	"px-interaction",
+	"subagent_status",
+	"subagent_result",
+	"px:intrapi-durable-message",
+	"px:intrapi-coordinator-ping-hint",
+]);
 
 type RenderSessionItem = AgentMessage | Extract<SessionEntry, { type: "custom" | "usage" }> | CompactionCostNotice;
 

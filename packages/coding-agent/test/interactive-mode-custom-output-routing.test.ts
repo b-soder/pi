@@ -8,6 +8,7 @@ import { createCustomMessage } from "../src/core/messages.ts";
 import { type SessionEntry, SessionManager } from "../src/core/session-manager.ts";
 import { CustomEntryComponent } from "../src/modes/interactive/components/custom-entry.ts";
 import { CustomMessageComponent } from "../src/modes/interactive/components/custom-message.ts";
+import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 import { getMarkdownTheme, initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { createHarness } from "./suite/harness.ts";
@@ -27,7 +28,14 @@ interface RoutingMode {
 	getMarkdownThemeWithSettings(): MarkdownTheme;
 }
 
-const customTypes = ["px-interaction", "subagent_status", "subagent_result", "px-questioner-log"];
+const customTypes = [
+	"px-interaction",
+	"subagent_status",
+	"subagent_result",
+	"px:intrapi-durable-message",
+	"px:intrapi-coordinator-ping-hint",
+];
+const modelVisibleTypes = [...customTypes, "px-questioner-log"];
 const timestamp = "2026-11-11T00:00:00.000Z";
 const content = "Full result\nfirst line\nlast line";
 
@@ -49,8 +57,14 @@ function makeMode(fourPanel: boolean, entryRenderer?: EntryRenderer, messageRend
 				extensionRunner: {
 					getMessageRenderer: () => messageRenderer,
 					getEntryRenderer: () => entryRenderer,
+					resolveToolRenderers: () => undefined,
 				},
-				settingsManager: { getShowCacheMissNotices: () => false },
+				sessionManager: { getCwd: () => process.cwd() },
+				settingsManager: {
+					getShowCacheMissNotices: () => false,
+					getShowImages: () => false,
+					getImageWidthCells: () => 80,
+				},
 			},
 		},
 		getMarkdownThemeWithSettings: getMarkdownTheme,
@@ -104,7 +118,7 @@ describe("InteractiveMode custom output routing", () => {
 				},
 			);
 
-			it("routes live and replayed Questioner entries, even while the assistant streams", async () => {
+			it("keeps live and replayed Questioner entries in chat, even while the assistant streams", async () => {
 				const renderer = vi.fn<EntryRenderer>((entry) => new Text(String(entry.data)));
 				const mode = makeMode(fourPanel, renderer);
 				const entry: Extract<SessionEntry, { type: "custom" }> = {
@@ -119,19 +133,41 @@ describe("InteractiveMode custom output routing", () => {
 				mode.chatContainer.addChild(mode.streamingComponent);
 				await mode.handleEvent({ type: "entry_appended", entry });
 				expect(renderer.mock.calls.at(-1)?.[0]).toBe(entry);
-				if (fourPanel) {
-					expect(mode.toolOutputContainer.children[0]).toBeInstanceOf(CustomEntryComponent);
-					expect(mode.chatContainer.children).toEqual([mode.streamingComponent]);
-				} else {
-					expect(mode.chatContainer.children[0]).toBeInstanceOf(CustomEntryComponent);
-					expect(mode.chatContainer.children[1]).toBe(mode.streamingComponent);
-					expect(mode.toolOutputContainer.children).toHaveLength(0);
-				}
+				expect(mode.chatContainer.children[0]).toBeInstanceOf(CustomEntryComponent);
+				expect(mode.chatContainer.children[1]).toBe(mode.streamingComponent);
+				expect(mode.toolOutputContainer.children).toHaveLength(0);
 				mode.streamingComponent = undefined;
 				mode.chatContainer.clear();
 				mode.toolOutputContainer.clear();
 				mode.renderSessionEntries([entry]);
-				expectPanel(mode, fourPanel, CustomEntryComponent);
+				expectPanel(mode, false, CustomEntryComponent);
+			});
+
+			it("keeps live and replayed Questioner messages in chat", async () => {
+				const mode = makeMode(fourPanel);
+				const message = createCustomMessage("px-questioner-log", content, true, undefined, timestamp);
+				await mode.handleEvent({ type: "message_start", message });
+				expectPanel(mode, false, CustomMessageComponent);
+				const manager = SessionManager.inMemory();
+				manager.appendCustomMessageEntry("px-questioner-log", content, true);
+				mode.chatContainer.clear();
+				mode.renderSessionEntries(manager.getBranch());
+				expectPanel(mode, false, CustomMessageComponent);
+			});
+
+			it("routes ask_question tool execution to tools output in four-panel mode", async () => {
+				const mode = makeMode(fourPanel);
+				await mode.handleEvent({
+					type: "tool_execution_start",
+					toolCallId: "question-call",
+					toolName: "ask_question",
+					args: { question: "Continue?" },
+				});
+				const target = fourPanel ? mode.toolOutputContainer : mode.chatContainer;
+				const other = fourPanel ? mode.chatContainer : mode.toolOutputContainer;
+				expect(target.children).toHaveLength(1);
+				expect(target.children[0]).toBeInstanceOf(ToolExecutionComponent);
+				expect(other.children).toHaveLength(0);
 			});
 
 			it("keeps unrelated records in chat and respects hidden messages and empty entries", () => {
@@ -163,7 +199,7 @@ describe("InteractiveMode custom output routing", () => {
 			if (event.type === "message_start" && event.message.role === "custom") await mode.handleEvent(event);
 		});
 		try {
-			for (const customType of customTypes) {
+			for (const customType of modelVisibleTypes) {
 				await harness.session.sendCustomMessage({
 					customType,
 					content,
@@ -171,7 +207,9 @@ describe("InteractiveMode custom output routing", () => {
 					details: { retained: true },
 				});
 			}
-			expect(harness.session.messages.filter((message) => message.role === "custom")).toHaveLength(4);
+			expect(harness.session.messages.filter((message) => message.role === "custom")).toHaveLength(
+				modelVisibleTypes.length,
+			);
 			const stream = harness.session.agent.streamFunction;
 			const observed = vi.fn<typeof stream>((model, context, options) => {
 				expect(
@@ -182,7 +220,7 @@ describe("InteractiveMode custom output routing", () => {
 								? message.content === content
 								: message.content.some((part) => part.type === "text" && part.text === content)),
 					),
-				).toHaveLength(4);
+				).toHaveLength(modelVisibleTypes.length);
 				return stream(model, context, options);
 			});
 			harness.session.agent.streamFunction = observed;
@@ -190,7 +228,14 @@ describe("InteractiveMode custom output routing", () => {
 			await harness.session.prompt("continue");
 			expect(observed).toHaveBeenCalledOnce();
 			const target = fourPanel ? mode.toolOutputContainer : mode.chatContainer;
-			expect(target.children.filter((child) => child instanceof CustomMessageComponent)).toHaveLength(4);
+			expect(target.children.filter((child) => child instanceof CustomMessageComponent)).toHaveLength(
+				fourPanel ? customTypes.length : modelVisibleTypes.length,
+			);
+			if (fourPanel) {
+				expect(mode.chatContainer.children.filter((child) => child instanceof CustomMessageComponent)).toHaveLength(
+					1,
+				);
+			}
 		} finally {
 			unsubscribe();
 			harness.cleanup();
