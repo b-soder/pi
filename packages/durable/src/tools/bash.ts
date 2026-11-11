@@ -11,7 +11,9 @@ const MAX_TIMEOUT_SECONDS = 2_147_483_647 / 1000;
 const bashSchema = obj(
 	{
 		command: str({ description: "Bash command to execute" }),
-		timeout: opt(num({ description: "Timeout in seconds (optional, no default timeout)" })),
+		timeout: opt(
+			num({ description: "Timeout in SECONDS (not milliseconds), e.g. 120 for two minutes; optional, no default" }),
+		),
 	},
 	{ open: true },
 );
@@ -19,7 +21,9 @@ const bashSchema = obj(
 const powershellSchema = obj(
 	{
 		command: str({ description: "PowerShell command to execute" }),
-		timeout: opt(num({ description: "Timeout in seconds (optional, no default timeout)" })),
+		timeout: opt(
+			num({ description: "Timeout in SECONDS (not milliseconds), e.g. 120 for two minutes; optional, no default" }),
+		),
 	},
 	{ open: true },
 );

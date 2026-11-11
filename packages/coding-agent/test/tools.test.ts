@@ -601,6 +601,15 @@ describe("Coding Agent Tools", () => {
 			await expect(bashTool.execute("test-call-10", { command, timeout: 0.05 })).rejects.toThrow(/timed out/i);
 		});
 
+		it("should reject timeouts over 24 hours as seconds, including for custom operations", async () => {
+			const operations: BashOperations = { exec: async () => ({ exitCode: 0 }) };
+			const bash = createBashTool(testDir, { operations });
+
+			await expect(bash.execute("test-call-long-timeout", { command: "remote", timeout: 86401 })).rejects.toThrow(
+				"Invalid timeout: 86401 seconds exceeds 24h; timeout is in seconds, not milliseconds",
+			);
+		});
+
 		it("should include full output path for truncated timeout and abort errors", async () => {
 			for (const testCase of [
 				{ error: "timeout:5", expected: "Command timed out after 5 seconds" },
