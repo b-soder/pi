@@ -180,6 +180,12 @@ export interface ExtensionUIContext {
 	/** Set status text in the footer/status bar. Pass undefined to clear. */
 	setStatus(key: string, text: string | undefined): void;
 
+	/** Right-aligned editor-divider text (interactive fork only). Undefined clears the slot.
+	 * Truncates to share space with the loader, including while idle. Custom editors may not render it.
+	 * Feature-detect this optional API and use a widget on hosts without it.
+	 */
+	setDividerStatus?(key: string, text: string | undefined): void;
+
 	/** Set the working/loading message shown during streaming. Call with no argument to restore default. */
 	setWorkingMessage(message?: string): void;
 

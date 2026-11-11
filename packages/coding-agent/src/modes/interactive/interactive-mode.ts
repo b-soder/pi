@@ -1075,6 +1075,7 @@ export class InteractiveMode {
 			dividerStatus: (width) =>
 				this.activeStatusIndicator?.renderInBorder(Math.max(1, width)) ||
 				this.activeStatusIndicator?.renderSpinnerInBorder(Math.max(1, width)),
+			dividerRightStatus: () => this.defaultEditor.getDividerStatus(),
 			getInputMode: () => this.inputPanelMode,
 			getActiveInputLabel: () =>
 				this.inputPanelMode === "nvim" || (this.inputPanelMode === "both" && this.nvimViewportContainer?.focused)
@@ -2690,6 +2691,7 @@ export class InteractiveMode {
 		for (const widget of this.extensionWidgetsBelow.values()) {
 			widget.dispose?.();
 		}
+		this.defaultEditor.clearDividerStatuses();
 		this.extensionWidgetsAbove.clear();
 		this.extensionWidgetsBelow.clear();
 		this.renderWidgets();
@@ -2889,6 +2891,10 @@ export class InteractiveMode {
 			notify: (message, type) => this.showExtensionNotify(message, type),
 			onTerminalInput: (handler) => this.addExtensionTerminalInputListener(handler),
 			setStatus: (key, text) => this.setExtensionStatus(key, text),
+			setDividerStatus: (key, text) => {
+				this.defaultEditor.setDividerStatus(key, text);
+				this.ui.requestRender();
+			},
 			setWorkingMessage: (message) => {
 				this.workingMessage = message;
 				if (this.activeStatusIndicator?.kind === "working") {

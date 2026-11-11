@@ -5,6 +5,7 @@ import {
 	type ScrollViewScrollbar,
 	type TuiMouseEvent,
 	type TuiMouseEventResult,
+	truncateToWidth,
 	VStack,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
@@ -15,6 +16,7 @@ export interface ChatViewportOptions {
 	readonly document: Component;
 	readonly activity?: Component;
 	readonly dividerStatus?: (width: number) => string | undefined;
+	readonly dividerRightStatus?: () => string;
 	readonly toolOutput?: Component;
 	readonly nvimViewport?: Component;
 	readonly getInputMode?: () => InputPanelMode;
@@ -73,13 +75,13 @@ class PanelDivider implements Component {
 	private readonly onResize: (delta: number) => void;
 	private readonly getStatus: ((width: number) => string | undefined) | undefined;
 	private readonly getCommandLine: ((width: number) => string | undefined) | undefined;
-	private readonly getRightLabel: (() => string | undefined) | undefined;
+	private readonly getRightLabel: ((width: number) => string | undefined) | undefined;
 
 	constructor(
 		onResize: (delta: number) => void,
 		getStatus?: (width: number) => string | undefined,
 		getCommandLine?: (width: number) => string | undefined,
-		getRightLabel?: () => string | undefined,
+		getRightLabel?: (width: number) => string | undefined,
 	) {
 		this.onResize = onResize;
 		this.getStatus = getStatus;
@@ -89,7 +91,7 @@ class PanelDivider implements Component {
 
 	render(width: number): string[] {
 		const safeWidth = Math.max(1, width);
-		const label = this.getRightLabel?.();
+		const label = this.getRightLabel?.(safeWidth);
 		const suffix = label && visibleWidth(label) + 2 < safeWidth ? ` ${label} ` : "";
 		const commandLine = this.getCommandLine?.(safeWidth);
 		// An active command and its cursor take precedence over the label when
@@ -101,7 +103,8 @@ class PanelDivider implements Component {
 			return [`${remaining > 0 ? `${commandLine} ${"─".repeat(remaining - 1)}` : commandLine}${right}`];
 		}
 		const left = "── ";
-		const status = this.getStatus?.(Math.max(0, contentWidth - visibleWidth(left) - 1));
+		const budget = Math.max(0, contentWidth - visibleWidth(left) - 1);
+		const status = budget > 0 ? truncateToWidth(this.getStatus?.(budget) ?? "", budget) : "";
 		if (!status) return [`${"─".repeat(contentWidth)}${right}`];
 		const remainder = Math.max(0, contentWidth - visibleWidth(left) - visibleWidth(status) - 1);
 		return [`${left}${status} ${"─".repeat(remainder)}${right}`];
@@ -153,6 +156,7 @@ class ResizablePanelStack extends VStack {
 	constructor(options: {
 		panels: readonly Component[];
 		dividerStatus?: (width: number) => string | undefined;
+		dividerRightStatus?: () => string;
 		panelMinSizes: readonly number[];
 		panelBases: readonly number[];
 		panelGrowth: readonly number[];
@@ -205,7 +209,10 @@ class ResizablePanelStack extends VStack {
 							? (width) => this.dividerStatus!.render(width)[0]
 							: undefined,
 						(width) => this.getNvimDividerCommandLine(index, width),
-						() => this.getFooterInputLabel(index),
+						(width) =>
+							this.hasDividerStatus(index)
+								? truncateToWidth(options.dividerRightStatus?.() ?? "", Math.max(0, Math.floor(width / 2) - 2))
+								: this.getFooterInputLabel(index),
 					),
 					{
 						basis: 1,
@@ -394,6 +401,7 @@ export function createChatViewport(options: ChatViewportOptions): ChatViewport {
 		const root = new ResizablePanelStack({
 			panels,
 			dividerStatus: options.dividerStatus,
+			dividerRightStatus: options.dividerRightStatus,
 			panelMinSizes: [3, 3, ...(options.nvimViewport ? [1] : []), 1, naturalFooterHeight],
 			panelBases: [
 				8,

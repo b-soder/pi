@@ -95,6 +95,37 @@ describe("status indicators", () => {
 		}
 	});
 
+	it("right-aligns divider slots when idle and shares the border with Working", () => {
+		initTheme("dark");
+		const tui = { requestRender: vi.fn(), terminal: { rows: 10 } } as unknown as TUI;
+		const editor = new CustomEditor(tui, getEditorTheme(), KeybindingsManager.create(), {
+			embedWorkingStatus: true,
+		});
+		editor.setDividerStatus("supervision", "supvz: off");
+		expect(stripAnsi(editor.render(80)[0]!)).toBe(`${"─".repeat(68)} supvz: off `);
+		const indicator = new WorkingStatusIndicator(tui, "Working");
+		try {
+			editor.setWorkingStatusIndicator(indicator);
+			editor.setDividerStatus("supervision", "supvz: on · next 12:05");
+			const line = stripAnsi(editor.render(80)[0]!);
+			expect(line).toContain("Working");
+			expect(line.endsWith(" supvz: on · next 12:05 ")).toBe(true);
+			for (const width of [1, 4, 6, 10, 20, 40, 80]) {
+				expect(visibleWidth(editor.render(width)[0]!)).toBe(width);
+			}
+			editor.setWorkingStatusIndicator(undefined);
+			editor.setDividerStatus("supervision", "界".repeat(100));
+			expect(visibleWidth(editor.render(20)[0]!)).toBe(20);
+			editor.setDividerStatus("supervision", undefined);
+			expect(stripAnsi(editor.render(20)[0]!)).toBe("─".repeat(20));
+			editor.setDividerStatus("other", "supvz: off");
+			editor.clearDividerStatuses();
+			expect(stripAnsi(editor.render(20)[0]!)).toBe("─".repeat(20));
+		} finally {
+			indicator.dispose();
+		}
+	});
+
 	it("disposes retry countdown updates", () => {
 		initTheme("dark");
 		vi.useFakeTimers();

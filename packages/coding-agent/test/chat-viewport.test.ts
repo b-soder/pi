@@ -35,6 +35,42 @@ describe("chat viewport", () => {
 		expect(hidden.transcript.scrollbar).toBe("hidden");
 	});
 
+	test.each(["orig", "nvim", "both"] as const)(
+		"shares the Working divider with right-aligned status in %s mode",
+		(mode) => {
+			let working = true;
+			let right = "supvz: on · next 12:05";
+			const viewport = createChatViewport({
+				document: new Container(),
+				toolOutput: new Container(),
+				nvimViewport: new Container(),
+				fourPanel: true,
+				getInputMode: () => mode,
+				dividerStatus: () => (working ? "⠋ Working" : undefined),
+				dividerRightStatus: () => right,
+				pendingMessages: new Container(),
+				status: new Container(),
+				editor: new Container(),
+				footer: new Container(),
+				getTerminalRows: () => 40,
+				getTerminalColumns: () => 80,
+			});
+			const render = (width: number) => renderLayoutFrame(viewport.root, width, 40, () => {});
+			const line = render(80).lines.find((line) => line.includes("Working"))!;
+			expect(line).toContain("Working");
+			expect(line.endsWith(` ${right} `)).toBe(true);
+			for (const width of [1, 4, 6, 10, 20, 40]) {
+				const frame = render(width);
+				expect(frame.lines.every((line) => stripVTControlCharacters(line).length <= width)).toBe(true);
+			}
+			working = false;
+			right = "supvz: off";
+			expect(render(80).lines.some((line) => line.endsWith(" supvz: off "))).toBe(true);
+			right = "";
+			expect(render(80).lines.join("\n")).not.toContain("supvz:");
+		},
+	);
+
 	test("places activity and status outside the input panel", () => {
 		const activity = new Container();
 		activity.addChild(new Text("OM worker", 0, 0));

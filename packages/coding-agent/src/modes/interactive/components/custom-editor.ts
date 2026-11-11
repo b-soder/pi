@@ -5,6 +5,7 @@ import {
 	type TUI,
 	type TuiMouseEvent,
 	type TuiMouseEventResult,
+	truncateToWidth,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import type { AppKeybinding, KeybindingsManager } from "../../../core/keybindings.ts";
@@ -21,6 +22,7 @@ export type CustomEditorOptions = EditorOptions & {
 export class CustomEditor extends Editor {
 	private keybindings: KeybindingsManager;
 	private workingStatusIndicator: StatusIndicator | undefined;
+	private dividerStatuses = new Map<string, string>();
 	public readonly embedWorkingStatus: boolean;
 	public actionHandlers: Map<AppKeybinding, () => void> = new Map();
 
@@ -42,7 +44,34 @@ export class CustomEditor extends Editor {
 		this.workingStatusIndicator = indicator;
 	}
 
+	/** Set right-aligned extension text in the editor divider. */
+	setDividerStatus(key: string, text: string | undefined): void {
+		if (text === undefined) this.dividerStatuses.delete(key);
+		else this.dividerStatuses.set(key, text.replace(/[\r\n\t]/g, " "));
+	}
+
+	/** Clear extension text when extensions are replaced. */
+	clearDividerStatuses(): void {
+		this.dividerStatuses.clear();
+	}
+
+	/** Read the shared divider text for fullscreen panel dividers. */
+	getDividerStatus(): string {
+		return [...this.dividerStatuses.values()].filter(Boolean).join(" · ");
+	}
+
 	protected override renderTopBorder(width: number, hiddenLineCount: number): string {
+		const text = this.getDividerStatus();
+		if (!text || width < 6) return this.renderStatusBorder(width, hiddenLineCount);
+		// Reserve space for the loader; on narrow terminals it can reduce to its spinner.
+		const budget = this.workingStatusIndicator ? Math.floor(width / 2) - 2 : width - 5;
+		const right = truncateToWidth(text, Math.max(0, budget));
+		if (!right) return this.renderStatusBorder(width, hiddenLineCount);
+		const leftWidth = width - visibleWidth(right) - 2;
+		return this.renderStatusBorder(leftWidth, hiddenLineCount) + this.borderColor(` ${right} `);
+	}
+
+	private renderStatusBorder(width: number, hiddenLineCount: number): string {
 		if (!this.embedWorkingStatus || !this.workingStatusIndicator || width <= 0) {
 			return super.renderTopBorder(width, hiddenLineCount);
 		}
