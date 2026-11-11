@@ -150,7 +150,12 @@ describe("AssistantMessageComponent", () => {
 			undefined,
 			"",
 		);
-		expect(withText.render(80).map((line) => stripAnsi(line).trim())).toEqual(["", "answer"]);
+		expect(
+			withText
+				.render(80)
+				.slice(1)
+				.map((line) => stripAnsi(line).trim()),
+		).toEqual(["", "answer"]);
 	});
 
 	test("keeps label row and spacing for hidden thinking with a label", () => {
@@ -163,7 +168,12 @@ describe("AssistantMessageComponent", () => {
 			]),
 			true,
 		);
-		expect(component.render(80).map((line) => stripAnsi(line).trim())).toEqual(["", "Thinking...", "", "answer"]);
+		expect(
+			component
+				.render(80)
+				.slice(1)
+				.map((line) => stripAnsi(line).trim()),
+		).toEqual(["", "Thinking...", "", "answer"]);
 	});
 
 	test("collapses individual thinking runs when clicked", () => {

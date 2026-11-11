@@ -169,6 +169,7 @@ import { formatKeyText, keyDisplayText, keyHint, keyText, rawKeyHint } from "./c
 import { LoginDialogComponent } from "./components/login-dialog.ts";
 import { createMarkdownTransform } from "./components/markdown-transform.ts";
 import { createMermaidMarkdownTransformer } from "./components/mermaid.ts";
+import { MessageTimestampComponent } from "./components/message-timestamp.ts";
 import { ModelSelectorComponent } from "./components/model-selector.ts";
 import { NeovimViewport } from "./components/neovim-viewport.ts";
 import {
@@ -4572,6 +4573,7 @@ export class InteractiveMode {
 					if (this.chatContainer.children.length > 0) {
 						this.chatContainer.addChild(new Spacer(1));
 					}
+					this.chatContainer.addChild(new MessageTimestampComponent(message.timestamp));
 					const skillBlock = parseSkillBlock(textContent);
 					if (skillBlock) {
 						// Render skill block (collapsible)

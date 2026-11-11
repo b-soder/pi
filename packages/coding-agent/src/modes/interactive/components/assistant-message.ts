@@ -11,6 +11,7 @@ import {
 import type { MarkdownTransformer } from "../../../core/extensions/types.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
 import { createMarkdownTransform } from "./markdown-transform.ts";
+import { MessageTimestampComponent } from "./message-timestamp.ts";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
@@ -30,6 +31,7 @@ interface MarkdownSlot {
  */
 export class AssistantMessageComponent extends Container {
 	private contentContainer: Container;
+	private timestampDivider?: MessageTimestampComponent;
 	private hideThinkingBlock: boolean;
 	private markdownTheme: MarkdownTheme;
 	private hiddenThinkingLabel: string;
@@ -117,6 +119,9 @@ export class AssistantMessageComponent extends Container {
 	updateContent(message: AssistantMessage, isStreaming = this.isStreaming): void {
 		this.lastMessage = message;
 		this.isStreaming = isStreaming;
+		if (!this.timestampDivider) {
+			this.timestampDivider = new MessageTimestampComponent(message.timestamp);
+		}
 
 		// Clear content container
 		this.contentContainer.clear();
@@ -255,5 +260,8 @@ export class AssistantMessageComponent extends Container {
 				this.contentContainer.addChild(new Text(theme.fg("error", `Error: ${errorMsg}`), this.outputPad, 0));
 			}
 		}
+		this.clear();
+		if (this.contentContainer.children.length > 0) this.addChild(this.timestampDivider);
+		this.addChild(this.contentContainer);
 	}
 }

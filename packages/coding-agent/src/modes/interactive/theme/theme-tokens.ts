@@ -26,6 +26,11 @@ export const THEME_TOKENS = defineThemeTokens({
 	border: { slot: "foreground", description: "Normal borders" },
 	borderAccent: { slot: "foreground", description: "Highlighted borders" },
 	borderMuted: { slot: "foreground", description: "Subtle borders" },
+	messageTimestamp: {
+		slot: "foreground",
+		description: "Chat message timestamp divider (dark blue in built-in themes)",
+		fallback: "border",
+	},
 	success: { slot: "foreground", description: "Success states" },
 	error: { slot: "foreground", description: "Error states" },
 	warning: { slot: "foreground", description: "Warning states" },

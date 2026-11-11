@@ -111,6 +111,10 @@
           "$ref": "#/$defs/ColorValue",
           "description": "Subtle borders"
         },
+        "messageTimestamp": {
+          "$ref": "#/$defs/ColorValue",
+          "description": "Chat message timestamp divider (dark blue in built-in themes)"
+        },
         "success": {
           "$ref": "#/$defs/ColorValue",
           "description": "Success states"

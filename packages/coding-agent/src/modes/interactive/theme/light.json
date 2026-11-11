@@ -14,6 +14,7 @@
 	},
 	"colors": {
 		"accent": "violet",
+		"messageTimestamp": 25,
 		"border": "okhsl(231 67% 55%)",
 		"borderAccent": "okhsl(295 59% 55%)",
 		"borderMuted": "okhsl(235 7% 66%)",
