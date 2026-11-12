@@ -485,6 +485,17 @@ describe("ExtensionRunner", () => {
 			expect(commands.map((c) => c.invocationName).sort()).toEqual(["cmd-a", "cmd-b"]);
 		});
 
+		it("preserves command argument hints", async () => {
+			fs.writeFileSync(
+				path.join(extensionsDir, "cmd.ts"),
+				`export default function(pi) { pi.registerCommand("deploy", { argumentHint: "<environment>", handler: async () => {} }); }`,
+			);
+
+			const result = await discoverAndLoadExtensions([], tempDir, tempDir);
+			const runner = new ExtensionRunner(result.extensions, result.runtime, tempDir, sessionManager, modelRegistry);
+			expect(runner.getCommand("deploy")?.argumentHint).toBe("<environment>");
+		});
+
 		it("gets command by invocation name", async () => {
 			const cmdCode = `
 				export default function(pi) {

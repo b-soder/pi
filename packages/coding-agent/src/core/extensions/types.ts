@@ -1622,6 +1622,7 @@ export interface RegisteredCommand {
 	name: string;
 	sourceInfo: SourceInfo;
 	description?: string;
+	argumentHint?: string;
 	getArgumentCompletions?: (argumentPrefix: string) => AutocompleteItem[] | null | Promise<AutocompleteItem[] | null>;
 	handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
 }

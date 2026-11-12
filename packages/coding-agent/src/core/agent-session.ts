@@ -3523,6 +3523,7 @@ export class AgentSession {
 			const extensionCommands: SlashCommandInfo[] = runner.getRegisteredCommands().map((command) => ({
 				name: command.invocationName,
 				description: command.description,
+				argumentHint: command.argumentHint,
 				source: "extension",
 				sourceInfo: command.sourceInfo,
 			}));

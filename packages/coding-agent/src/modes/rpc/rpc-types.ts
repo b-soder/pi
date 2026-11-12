@@ -83,6 +83,8 @@ export interface RpcSlashCommand {
 	name: string;
 	/** Human-readable description */
 	description?: string;
+	/** Hint displayed for command arguments */
+	argumentHint?: string;
 	/** What kind of command this is */
 	source: "extension" | "prompt" | "skill";
 	/** Source metadata for the owning resource */

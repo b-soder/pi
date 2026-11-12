@@ -1750,13 +1750,14 @@ pi.registerCommand("stats", {
 });
 ```
 
-Optional: add argument auto-completion for `/command ...`. `getArgumentCompletions` can also return a `Promise`:
+Set `argumentHint` to show a short usage hint next to the command in autocomplete. Optionally add argument auto-completion for `/command ...`; `getArgumentCompletions` can also return a `Promise`:
 
 ```typescript
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 
 pi.registerCommand("deploy", {
   description: "Deploy to an environment",
+  argumentHint: "<environment>",
   getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
     const envs = ["dev", "staging", "prod"];
     const items = envs.map((e) => ({ value: e, label: e }));
