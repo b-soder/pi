@@ -12,7 +12,7 @@ last-reviewed: 2026-11-12
 
 This fork preserves upstream Pi's standalone agent harness and adds fullscreen UI/editor behavior, presentation APIs, shell guardrails, and selected Chord fixes. PX is a separate companion installation: Pair, subagents, ToolGuard, Questioner, Notifier, Intrapi, and observational memory are **not implemented by this fork**. Browser/web copies were removed from current PX; neither checkout supplies those optional external tools. Chord and Durable already existed upstream; they are not wholesale fork additions.
 
-The reviewed fork snapshot is `c4b28cb3ee6ab6a18aec7be968c5fd5431d7d922`, branch `devenv`; locally recorded upstream base/merge-base is `085c84e98e7f4c950f2be606466fff4f75d8fe7c`. No network fetch was performed, so that is not necessarily today's remote tip. Final-tree fork inventory: 133 changed paths, 8,019 additions/384 deletions including tests/docs/locks. The old root README's 1.4 version label is stale against the **1.5.0 private candidate** compatibility ledger; neither label establishes global release acceptance or installed bundle identity.
+The reviewed fork snapshot is `c4b28cb3ee6ab6a18aec7be968c5fd5431d7d922`, branch `devenv` (now released as the fork's `main`); locally recorded upstream base/merge-base is `085c84e98e7f4c950f2be606466fff4f75d8fe7c`. No network fetch was performed, so that is not necessarily today's remote tip. Final-tree fork inventory: 133 changed paths, 8,019 additions/384 deletions including tests/docs/locks. The old root README's 1.4 version label is stale against the **1.5.0 private candidate** compatibility ledger; neither label establishes global release acceptance or installed bundle identity.
 
 ## How it works: differences from upstream
 
@@ -158,7 +158,7 @@ This is a reviewed workflow, not automatic fetching/merging/deployment:
 6. Update PX exact commit/version ledger, peers/linkers, offline locks; validate explicit fork source/artifacts and separately built stock host if retained compatible. Update factory trust pins only through its reviewed procedure when exact hashed inputs changed.
 7. Commit reviewed files with authorization; advance parent gitlinks in dependency order. Push/integrate/deploy are separate approvals; check remote tips, never force-push. GitLab is an optional manually pushed private copy, not an automatic mirror; use recipient-configured identity, no embedded organizational host/key assumptions.
 
-**Migration note:** `<pi-root>` and `<px-root>` are canonical prepared source/artifact identities, not active aliases. The `devenv` branch need not be renamed with forge-factory. Cwd mapping and legacy deployment paths require deliberate portability work; see the external forge-factory `docs/roadmap.md`.
+**Migration note:** `<pi-root>` and `<px-root>` are canonical prepared source/artifact identities, not active aliases. The fork's release branch is `main` (fast-forwarded from the former `devenv` branch); upstream sync merges `upstream/main` into `main`. Cwd mapping and legacy deployment paths require deliberate portability work; see the external forge-factory `docs/roadmap.md`.
 
 ## Failure and recovery
 
