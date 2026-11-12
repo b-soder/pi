@@ -112,6 +112,38 @@ describe("extension factory cache", () => {
 		expect(state().factoryRuns).toBe(2);
 	});
 
+	it.each(["ts", "js"])("reloads changed project extension dependencies (%s)", async (suffix) => {
+		const { cwd, agentDir } = fixture(`dependency-${suffix}`);
+		const extensionDir = join(cwd, ".pi", "extensions");
+		const dependencyDir = join(cwd, ".pi", "skills");
+		mkdirSync(extensionDir, { recursive: true });
+		mkdirSync(dependencyDir, { recursive: true });
+		const dependency = join(dependencyDir, `value.${suffix}`);
+		writeFileSync(dependency, 'export const value = "first";');
+		writeFileSync(
+			join(extensionDir, "entry.ts"),
+			`import { value } from "../skills/value.${suffix}";\nexport default (pi) => pi.registerCommand("example", { description: value, handler() {} });`,
+		);
+		const loader = new DefaultResourceLoader({
+			cwd,
+			agentDir,
+			noSkills: true,
+			noPromptTemplates: true,
+			noThemes: true,
+		});
+		await loader.reload();
+		expect(loader.getExtensions().extensions[0]?.commands.get("example")?.description).toBe("first");
+		writeFileSync(dependency, 'export const value = "other";');
+		await loader.reload();
+		expect(loader.getExtensions().extensions[0]?.commands.get("example")?.description).toBe("other");
+		writeFileSync(
+			join(extensionDir, "entry.ts"),
+			'export default (pi) => pi.registerCommand("example", { description: "entry changed", handler() {} });',
+		);
+		await loader.reload();
+		expect(loader.getExtensions().extensions[0]?.commands.get("example")?.description).toBe("entry changed");
+	});
+
 	it("keeps the cache scoped to one cwd", async () => {
 		const { root } = fixture("cross-cwd");
 		const firstCwd = join(root, "first");
