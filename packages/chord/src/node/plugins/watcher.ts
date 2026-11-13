@@ -26,9 +26,9 @@ import { BACKGROUND_CONTEXT, type Context } from "../../context/index.ts";
 import type { JsonValue } from "../../json.ts";
 import { type Batch, Source } from "../../state/internal.ts";
 import { type BaseInputs, contentHash } from "./base-inputs.ts";
-import { type ReconcileSelection, WatchReconciler } from "./reconcile.ts";
 import { type BuiltFacet, inside } from "./build.ts";
 import { type Discovery, FACET_EXTENSIONS, type Plugin, sameFiles } from "./discover.ts";
+import { type ReconcileSelection, WatchReconciler } from "./reconcile.ts";
 
 /** The marks: plugins to rebuild, plugins to install, whether to discover again, whether base code changed. */
 export type PluginsState = {
@@ -490,9 +490,15 @@ export class PluginWatcher extends Source {
 	/** Watches `dir` and, walking down, every directory under it but ignored ones (each not watched yet). */
 	#watchDirs(dir: string): void {
 		if (this.#reported) return;
-		const selection: ReconcileSelection = this.#inBaseDir(dir) && !this.#inPluginTree(dir)
-			? { kind: "files", names: new Set([...this.#recorded].filter((file) => dirname(file) === dir).map((file) => basename(file))) }
-			: { kind: "tree" };
+		const selection: ReconcileSelection =
+			this.#inBaseDir(dir) && !this.#inPluginTree(dir)
+				? {
+						kind: "files",
+						names: new Set(
+							[...this.#recorded].filter((file) => dirname(file) === dir).map((file) => basename(file)),
+						),
+					}
+				: { kind: "tree" };
 		this.#reconciler.add(dir, selection);
 		if (this.#watchers.has(dir)) return;
 		let watcher: FSWatcher;
