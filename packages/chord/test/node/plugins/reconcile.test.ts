@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { contentHash } from "../../../src/node/plugins/base-inputs.ts";
 import { WatchReconciler } from "../../../src/node/plugins/reconcile.ts";
 import { PluginWatcher } from "../../../src/node/plugins/watcher.ts";
 import { Batch } from "../../../src/state/internal.ts";
@@ -240,7 +241,7 @@ describe("finite best-effort watch reconciliation", () => {
 		expect(vi.getTimerCount()).toBe(0);
 	});
 
-	it("base-only directories enumerate and count only tracked files, not unrelated siblings", () => {
+	it("base-only directories enumerate and count only tracked files, not unrelated siblings", async () => {
 		vi.useFakeTimers();
 		const path = root();
 		const file = join(path, "entry.ts");
@@ -256,7 +257,7 @@ describe("finite best-effort watch reconciliation", () => {
 		);
 		closers.push(() => watched.close());
 		const marks = vi.spyOn(watched, "mark");
-		watched.baseFiles([file]);
+		await watched.recordBase(new Map([[file, contentHash(Buffer.from("old"))]]));
 		vi.advanceTimersByTime(250);
 		expect(marks).toHaveBeenCalledExactlyOnceWith(file);
 		marks.mockClear();
@@ -320,17 +321,17 @@ describe("finite best-effort watch reconciliation", () => {
 		expect(vi.getTimerCount()).toBe(0);
 	});
 
-	it("reopens a window when a base-file handle is registered on an already watched tree directory", () => {
+	it("reopens a window when a base-file handle is registered on an already watched tree directory", async () => {
 		const path = root();
 		const file = join(path, "entry.ts");
 		writeFileSync(file, "original");
 		const { watched, diagnostics } = watcher(path);
 		vi.advanceTimersByTime(3100);
 		expect(vi.getTimerCount()).toBe(0);
-		watched.baseFiles([file]);
+		await watched.recordBase(new Map([[file, contentHash(Buffer.from("original"))]]));
 		writeFileSync(file, "dropped after duplicate directory registration");
 		vi.advanceTimersByTime(3100);
-		expect(watched.value).toMatchObject({ base: true });
+		await vi.waitFor(() => expect(watched.value).toMatchObject({ base: true }));
 		expect(diagnostics).toEqual([]);
 		expect(vi.getTimerCount()).toBe(0);
 	});

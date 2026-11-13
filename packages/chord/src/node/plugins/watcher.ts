@@ -120,7 +120,14 @@ export class PluginWatcher extends Source {
 	constructor(options: WatcherOptions, batch: Batch) {
 		super(batch);
 		this.#options = options;
-		this.#reconciler = new WatchReconciler((path) => this.#changedIn(path), options.failed);
+		this.#reconciler = new WatchReconciler((path) => {
+			const dir = dirname(path);
+			if (this.#watchers.has(dir) || this.#watchers.has(path)) this.#changedIn(path);
+			else if (this.#recorded.has(path)) this.mark(path);
+			else if (this.#baseWatchers.has(path)) {
+				for (const file of this.#recorded) if (dirname(file) === path) this.mark(file);
+			}
+		}, options.failed);
 		// Events name paths under the directories as watched: by their real paths, as discovery names plugins.
 		this.#roots = options.roots.map(real);
 		const base = options.base.map(real);
@@ -411,8 +418,15 @@ export class PluginWatcher extends Source {
 	 */
 	#watchAlone(dir: string): void {
 		if (this.#reported) return;
-		const names = new Set([...this.#recorded].filter((file) => dirname(file) === dir).map((file) => basename(file)));
-		this.#reconciler.add(dir, { kind: "files", names });
+		const selection: ReconcileSelection = this.#inPluginTree(dir)
+			? { kind: "tree" }
+			: {
+					kind: "files",
+					names: new Set(
+						[...this.#recorded].filter((file) => dirname(file) === dir).map((file) => basename(file)),
+					),
+				};
+		this.#reconciler.add(dir, selection);
 		if (this.#baseWatchers.has(dir)) return;
 		let watcher: FSWatcher;
 		try {
