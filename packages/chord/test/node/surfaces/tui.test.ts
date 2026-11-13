@@ -3,19 +3,17 @@
 // plugin scripts registering themselves. A terminal plugin has no assets: a Node build refuses them (Opus L5).
 
 import { readFile } from "node:fs/promises";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { BACKGROUND_CONTEXT as context } from "../../../src/context/index.ts";
 import { TuiScripts } from "../../../src/index.ts";
-import { createPlugins } from "../../../src/node/plugins/index.ts";
 import type { TuiStart } from "../../../src/node/surfaces/index.ts";
 import { send } from "../http/support.ts";
-import { HOST_PACKAGES, tempRoot, writePlugin } from "../plugins/support.ts";
+import { writePlugin } from "../plugins/support.ts";
 import { tuiApp } from "../tui/support.ts";
 
 describe("the terminal surface", () => {
-	// Closing fixture-owned native plugin watchers takes tens of seconds on this macOS host.
 	it("serves a signed-in launcher its start, the base bundle and the scripts; the base hash to anyone", async () => {
-		const { app, port } = await tuiApp();
+		const { app, port, root } = await tuiApp();
 		try {
 			const headers = { authorization: `Bearer ${(await readFile(app.ownerTokenFile, "utf8")).trim()}` };
 			expect((await send(port, "GET", "/_chord/tui/start")).status).toBe(401);
@@ -41,33 +39,19 @@ describe("the terminal surface", () => {
 				script.replace(/\n\/\/# sourceMappingURL=data:[^\n]*/, ""),
 			);
 			scripts.release();
-		} finally {
-			await app.close(context);
-		}
-	}, 60_000);
-
-	it("rejects assets in a Node terminal plugin build", async () => {
-		const root = await tempRoot();
-		await writePlugin(root, "pictured", "@test/pictured", {
-			"tui.ts": 'import icon from "./icon.svg?url";\nexport default { setup: () => icon };',
-			"icon.svg": "<svg/>",
-		});
-		const plugins = createPlugins(
-			{
-				roots: [root],
-				kinds: { tui: { platform: "node", hostPackages: Object.keys(HOST_PACKAGES) } },
-				onError: () => {},
-			},
-			context,
-		);
-		try {
-			const built = await plugins.build(["@test/pictured"], context);
+			// Terminal facets are Node builds: an asset import fails the build, so the surface serves none.
+			await writePlugin(root, "pictured", "@test/pictured", {
+				"tui.ts": 'import icon from "./icon.svg?url";\nexport default { setup: () => icon };',
+				"icon.svg": "<svg/>",
+			});
+			await vi.waitFor(() => expect(app.plugins.state.value.set).toBe(true));
+			const built = await app.plugins.component.build(["@test/pictured"], context);
 			expect(built.facets.find(({ plugin }) => plugin === "@test/pictured")).toMatchObject({
 				kind: "failed",
 				errors: [expect.stringContaining("assets by URL are for browser builds")],
 			});
 		} finally {
-			plugins.close();
+			await app.close(context);
 		}
-	}, 60_000);
+	});
 });

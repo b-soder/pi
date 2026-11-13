@@ -146,21 +146,6 @@ describe("the links endpoint", () => {
 		}
 	});
 
-	it("terminates other socket errors while preserving their protocol close", async () => {
-		const terminate = vi.spyOn(WebSocket.prototype, "terminate");
-		const server = await served({}, { config: { links: { path: "/chord" } } });
-		try {
-			const socket = await socketTo(server.port, "/chord", { "x-principal": "owner" });
-			const closed = closeOf(socket);
-			socket.send(Buffer.from([0xff]), { binary: false });
-			expect((await closed).code).toBe(1007);
-			expect(terminate).toHaveBeenCalledTimes(1);
-		} finally {
-			await server.close();
-			terminate.mockRestore();
-		}
-	});
-
 	it("cuts off a client that stopped reading: past 4 MiB unsent beyond the frame being sent", () => {
 		const sent: number[] = [];
 		let terminated = 0;

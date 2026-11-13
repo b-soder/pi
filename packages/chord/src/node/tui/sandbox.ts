@@ -157,6 +157,7 @@ export class Sandbox {
 	): Promise<Sandbox> {
 		requireSandboxNode();
 		if (Buffer.byteLength(source) > MAX_BUNDLE) throw new Error("terminal: the base bundle exceeds 8 MiB");
+		// Node resolves its entry before reading it; a symlinked ancestor would need a broader file grant.
 		const directory = await realpath(await mkdtemp(join(tmpdir(), "chord-tui-")));
 		await writeFile(join(directory, BOOTSTRAP_FILE), BOOTSTRAP);
 		const sandbox = new Sandbox(directory, onMessage, onEnd);
