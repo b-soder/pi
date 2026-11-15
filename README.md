@@ -14,14 +14,14 @@
 
 Pi is a minimal, extensible agent harness that you can make your own.
 
-## `devenv` branch
+## The Pi fork
 
-The `devenv` branch is a standalone Pi 1.4.0 fork focused on a resizable fullscreen workflow,
+This fork's development branch is `main` and its current version is Pi 1.5.2. It is a standalone fork focused on a resizable fullscreen workflow,
 embedded Neovim input, and clearer session/model presentation. Its changes live in Pi itself:
 build and run it without `px`, tmux, ToolGuard, or other companion extensions. The entries
 below describe **fork-specific behavior**, not claims that vanilla Pi lacks ordinary editing,
 sessions, or models; the generic Getting started section further down installs upstream Pi, not
-this branch. Optional `px` integrations such as Pair, subagents, browser tools, and Interaction
+this fork. Optional `px` integrations such as Pair, subagents, browser tools, and Interaction
 Tools are separate installations.
 
 ### Tool Index
@@ -29,7 +29,7 @@ Tools are separate installations.
 #### Four-panel fullscreen layout
 
 - **Summary:** Resize separate tool-output, conversation, input, and status regions.
-- **Works with:** This `devenv` fork in fullscreen mode; the `four-panel` variant is not
+- **Works with:** This fork in fullscreen mode; the `four-panel` variant is not
   supplied by the pinned vanilla Pi host or VS Code Copilot.
 - **Requires:** The built fork and `experimentalTuiLayout: "four-panel"` in Pi settings,
   followed by a Pi restart. No `px`, tmux, or Neovim is required to use the original input
@@ -110,14 +110,14 @@ connected to Pi. **Setup:** [use `/cl`](#use-cl).
 
 ### Install Details
 
-#### Install the `devenv` fork
+#### Install the Pi fork
 
 Install from source with Git, Node.js 22.19 or newer, and npm. The build does not require `px`,
 `jq`, tmux, or Neovim:
 
 ```bash
-git clone --branch devenv --single-branch git@github.com:b-soder/pi.git ~/src/pi-devenv
-cd ~/src/pi-devenv
+git clone --branch main --single-branch git@github.com:b-soder/pi.git ~/REPO/pi
+cd ~/REPO/pi
 npm ci --ignore-scripts
 npm run build
 cd packages/coding-agent

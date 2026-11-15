@@ -1,18 +1,18 @@
 ---
-title: The devenv Pi fork
+title: The Pi fork
 description: Fork-only features, state, paired PX builds, deployment, and upstream maintenance.
 status: Current
 owner: Pi fork
-last-reviewed: 2026-11-12
+last-reviewed: 2026-11-15
 ---
 
-# The devenv Pi fork
+# The Pi fork
 
 ## Purpose
 
 This fork preserves upstream Pi's standalone agent harness and adds fullscreen UI/editor behavior, presentation APIs, shell guardrails, and selected Chord fixes. PX is a separate companion installation: Pair, subagents, ToolGuard, Questioner, Notifier, Intrapi, and observational memory are **not implemented by this fork**. Browser/web copies were removed from current PX; neither checkout supplies those optional external tools. Chord and Durable already existed upstream; they are not wholesale fork additions.
 
-The reviewed fork snapshot is `c4b28cb3ee6ab6a18aec7be968c5fd5431d7d922`, branch `devenv` (now released as the fork's `main`); locally recorded upstream base/merge-base is `085c84e98e7f4c950f2be606466fff4f75d8fe7c`. No network fetch was performed, so that is not necessarily today's remote tip. Final-tree fork inventory: 133 changed paths, 8,019 additions/384 deletions including tests/docs/locks. The old root README's 1.4 version label is stale against the **1.5.0 private candidate** compatibility ledger; neither label establishes global release acceptance or installed bundle identity.
+The fork's development branch is `main`; its current Pi version is 1.5.2, merged with upstream v1.5.2. Upstream's v1.x tags remain upstream-owned. The repository has an `origin` at `github.com/b-soder/pi` and an `upstream` at `github.com/earendil-works/pi`. The canonical local checkout is `~/REPO/pi` (feature worktrees use `~/REPO/pi.<branch>`), globally installed via `npm link` from `packages/coding-agent`. PX and forge-factory are separate repositories; PX `compatibility.json` pins the Pi commit/tag. A GitLab push mirror is planned at `https://gitlab.gin.ntt.net/forge/pi`; do not add it as a remote. The reviewed fork snapshot is `c4b28cb3ee6ab6a18aec7be968c5fd5431d7d922`; locally recorded upstream base/merge-base is `085c84e98e7f4c950f2be606466fff4f75d8fe7c`. Final-tree fork inventory: 133 changed paths, 8,019 additions/384 deletions including tests/docs/locks.
 
 ## How it works: differences from upstream
 
@@ -54,7 +54,7 @@ The reviewed fork snapshot is `c4b28cb3ee6ab6a18aec7be968c5fd5431d7d922`, branch
 Reproduce the complete changed-path inventory read-only:
 
 ```bash
-git diff --name-only 085c84e98e7f4c950f2be606466fff4f75d8fe7c..devenv
+git diff --name-only 085c84e98e7f4c950f2be606466fff4f75d8fe7c..main
 ```
 
 ## Usage and commands
@@ -138,7 +138,7 @@ If stock upstream is advertised compatible, build and check it separately too. T
 
 ## Safety, deployment, and rollback
 
-Pi remains standalone; companion installation is optional. Typical npm linking from `packages/coding-agent` changes the global CLI and is **deployment**, requiring conflict inspection and explicit authorization. In a devenv-managed installation, preserve Stow ownership; never ad hoc-copy deployed extensions or retarget links to a feature tree.
+Pi remains standalone; companion installation is optional. Typical npm linking from `packages/coding-agent` changes the global CLI and is **deployment**, requiring conflict inspection and explicit authorization. In a managed installation, preserve Stow ownership; never ad hoc-copy deployed extensions or retarget links to a feature tree.
 
 Before live promotion: record actual CLI symlink/global prefix, old Pi/PX tips, all generated peer links, service state, and effective policy. Create and verify a private rollback snapshot of ignored dependencies, model data, and built artifacts. Run parent Stow simulation and PX generated-dependency link plan before/after; no Stow apply is needed when targets stay unchanged. Only separately approved live source/artifact promotion may update canonical checkouts and rebuild linked output. **Rebuilding live dist changes deployment even without relinking.**
 
@@ -151,14 +151,14 @@ On failure, stop promotion, preserve failed artifacts, and use verified old refs
 This is a reviewed workflow, not automatic fetching/merging/deployment:
 
 1. Inspect current Pi/PX/parent worktrees and installed identity; resolve upstream release, package version, and old tips; create backup refs with authorization.
-2. Prepare a **parent devenv feature worktree**, then deliberate Pi/PX submodule branches/bases/dependencies inside it. Current factory instructions supersede the older guide's standalone-submodule worktree recipe. Never edit the live submodule as an incidental sync.
+2. Prepare a **parent feature worktree**, then deliberate Pi/PX submodule branches/bases/dependencies inside it. Current factory instructions supersede the older guide's standalone-submodule worktree recipe. Never edit the live submodule as an incidental sync.
 3. Fetch/review fork `origin` and upstream `upstream` tips. Resolve the intended immutable upstream commit; merge it into the fork candidate with `git merge --no-commit --no-ff <resolved-upstream-commit>`. Preserve two-parent history and inspect conflicts individually. The older guide uses `origin/main`; do not assume that ref is today's intended upstream.
 4. Review exact dependencies and regenerate root/installer locks (`npm install --package-lock-only --ignore-scripts`, `node scripts/generate-coding-agent-install-lock.mjs`); retain fork dependencies and review lock diff. Use approved `PI_ALLOW_LOCKFILE_CHANGE=1` only for reviewed lock commits; never bypass hooks.
 5. Install locked dependencies without lifecycle scripts, hydrate models, regenerate schemas if changed, run `npm run check` (writes formatting), offline build, focused tests, and credential-isolated `./test.sh` as admitted. Do not call a green subset broad acceptance.
 6. Update PX exact commit/version ledger, peers/linkers, offline locks; validate explicit fork source/artifacts and separately built stock host if retained compatible. Update factory trust pins only through its reviewed procedure when exact hashed inputs changed.
 7. Commit reviewed files with authorization; advance parent gitlinks in dependency order. Push/integrate/deploy are separate approvals; check remote tips, never force-push. GitLab is an optional manually pushed private copy, not an automatic mirror; use recipient-configured identity, no embedded organizational host/key assumptions.
 
-**Migration note:** `<pi-root>` and `<px-root>` are canonical prepared source/artifact identities, not active aliases. The fork's release branch is `main` (fast-forwarded from the former `devenv` branch); upstream sync merges `upstream/main` into `main`. Cwd mapping and legacy deployment paths require deliberate portability work; see the external forge-factory `docs/roadmap.md`.
+**Migration note:** `<pi-root>` and `<px-root>` are canonical prepared source/artifact identities, not active aliases. The fork's development branch is `main`; upstream sync merges the selected upstream commit into `main`. Cwd mapping and legacy deployment paths require deliberate portability work; see the external forge-factory `docs/roadmap.md`.
 
 ## Failure and recovery
 
