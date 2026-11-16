@@ -1,4 +1,15 @@
+import { resolve } from "node:path";
 import { defineConfig, mergeConfig } from "vitest/config";
+
+const coverage = process.env.PI_COVERAGE_DIR
+	? {
+			enabled: true,
+			provider: "v8" as const,
+			include: ["src/**/*.ts"],
+			reporter: ["json"],
+			reportsDirectory: resolve(process.env.PI_COVERAGE_DIR, "vitest-coding-agent"),
+		}
+	: {};
 import baseConfig, { workspaceSourcePaths } from "../../vitest.base.ts";
 
 export default mergeConfig(
@@ -13,6 +24,7 @@ export default mergeConfig(
 			unstubEnvs: true,
 			reporters: process.env.GITHUB_ACTIONS ? ["dot", "github-actions"] : ["dot"],
 			silent: "passed-only",
+			coverage,
 			server: {
 				deps: {
 					external: [/@silvia-odwyer\/photon-node/],

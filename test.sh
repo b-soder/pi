@@ -74,6 +74,14 @@ done
 value="${NODE_EXTRA_CA_CERTS-}"
 [[ -z "$value" ]] || test_env+=("NODE_EXTRA_CA_CERTS=$value")
 
+# Coverage is opt-in. Node's V8 collector inherits into spawned processes, which covers
+# tests that launch Node directly as well as the node:test TUI suite.
+value="${PI_COVERAGE_DIR-}"
+if [[ -n "$value" ]]; then
+	mkdir -p "$value/v8"
+	test_env+=("PI_COVERAGE_DIR=$value" "NODE_V8_COVERAGE=$value/v8")
+fi
+
 # Preserve CI detection only for runner behavior and test reporting.
 for name in CI GITHUB_ACTIONS; do
 	value="${!name-}"
