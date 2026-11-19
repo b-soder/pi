@@ -28,6 +28,7 @@ describe("InteractiveMode compaction events", () => {
 		initTheme("dark");
 		const enabled = {
 			chatContainer: new Container(),
+			closeThinkingGroup: vi.fn(),
 			settingsManager: { getShowCacheMissNotices: () => true },
 		};
 		addCompactionCostNotice.call(enabled, { type: "compaction_cost", kind: "compaction", usage });
@@ -42,6 +43,7 @@ describe("InteractiveMode compaction events", () => {
 
 		const disabled = {
 			chatContainer: new Container(),
+			closeThinkingGroup: vi.fn(),
 			settingsManager: { getShowCacheMissNotices: () => false },
 		};
 		addCompactionCostNotice.call(disabled, { type: "compaction_cost", kind: "compaction", usage });

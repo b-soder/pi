@@ -199,6 +199,8 @@ import {
 	WorkingStatusIndicator,
 } from "./components/status-indicator.ts";
 import { ThemedText } from "./components/themed-text.ts";
+import { ThinkingGroupComponent } from "./components/thinking-group.ts";
+import { ConversationThinkingTracker, type ThinkingGroup } from "./components/thinking-groups.ts";
 import { ThinkingSelectorComponent } from "./components/thinking-selector.ts";
 import { ToolExecutionComponent } from "./components/tool-execution.ts";
 import { TreeSelectorComponent } from "./components/tree-selector.ts";
@@ -293,6 +295,27 @@ class BuiltInHeader extends ExpandableText {
 }
 
 type ExtensionDialogComponent = Component & { dispose?(): void };
+
+class ConversationLogContainer extends Container {
+	private readonly noteVisibleEntry: () => void;
+
+	constructor(noteVisibleEntry: () => void) {
+		super();
+		this.noteVisibleEntry = noteVisibleEntry;
+	}
+
+	override addChild(component: Component): void {
+		if (
+			!(component instanceof Spacer) &&
+			!(component instanceof MessageTimestampComponent) &&
+			!(component instanceof ThinkingGroupComponent) &&
+			!(component instanceof AssistantMessageComponent)
+		) {
+			this.noteVisibleEntry();
+		}
+		super.addChild(component);
+	}
+}
 
 type CompactionQueuedMessage = {
 	text: string;
@@ -501,6 +524,11 @@ export class InteractiveMode {
 	private loadedResourcesContainer: Container;
 	private chatContainer: Container;
 	private toolOutputContainer: Container;
+	private readonly thinkingTracker = new ConversationThinkingTracker();
+	private readonly thinkingGroupComponents = new Map<ThinkingGroup, ThinkingGroupComponent>();
+	private readonly thinkingMergedMessageComponents = new Set<AssistantMessageComponent>();
+	private openThinkingGroup: ThinkingGroup | undefined;
+	private streamingThinkingSections = 0;
 	private nvimViewportContainer: NeovimViewport | undefined;
 	private documentContainer: Container;
 	private toolOutputEnabled = false;
@@ -705,7 +733,7 @@ export class InteractiveMode {
 		this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
 		this.headerContainer = new Container();
 		this.loadedResourcesContainer = new Container();
-		this.chatContainer = new Container();
+		this.chatContainer = new ConversationLogContainer(() => this.closeThinkingGroup());
 		this.toolOutputContainer = new Container();
 		this.documentContainer = new Container();
 		this.documentContainer.addChild(this.headerContainer);
@@ -2460,6 +2488,7 @@ export class InteractiveMode {
 
 	private addToolExecutionComponent(component: Component): void {
 		if (!this.toolOutputEnabled) {
+			this.closeThinkingGroup();
 			this.chatContainer.addChild(component);
 			return;
 		}
@@ -2636,6 +2665,12 @@ export class InteractiveMode {
 
 	private setHiddenThinkingLabel(label?: string): void {
 		this.hiddenThinkingLabel = label ?? this.defaultHiddenThinkingLabel;
+		for (const component of this.thinkingGroupComponents.values()) {
+			component.setLabel(this.hiddenThinkingLabel);
+		}
+		for (const component of this.thinkingMergedMessageComponents) {
+			component.setTimestampDividerEnabled(!this.hiddenThinkingLabel.trim());
+		}
 		for (const child of this.chatContainer.children) {
 			if (child instanceof AssistantMessageComponent) {
 				child.setHiddenThinkingLabel(this.hiddenThinkingLabel);
@@ -4114,14 +4149,19 @@ export class InteractiveMode {
 						this.outputPad,
 						this.getMarkdownTransformers(),
 					);
+					this.streamingThinkingSections = 0;
 					this.streamingMessage = event.message;
 					this.chatContainer.addChild(this.streamingComponent);
+					const groupedMessage = this.updateStreamingThinking(this.streamingMessage);
 					const conversationMessage = this.toolOutputEnabled
 						? {
-								...this.streamingMessage,
-								content: this.streamingMessage.content.filter((content) => content.type !== "toolCall"),
+								...groupedMessage,
+								content: groupedMessage.content.filter((content) => content.type !== "toolCall"),
 							}
-						: this.streamingMessage;
+						: groupedMessage;
+					this.streamingComponent.setTimestampDividerEnabled(
+						this.streamingThinkingSections === 0 || !this.hiddenThinkingLabel.trim(),
+					);
 					this.streamingComponent.updateContent(conversationMessage, true);
 					this.ui.requestRender();
 				}
@@ -4130,12 +4170,16 @@ export class InteractiveMode {
 			case "message_update":
 				if (this.streamingComponent && event.message.role === "assistant") {
 					this.streamingMessage = event.message;
+					const groupedMessage = this.updateStreamingThinking(this.streamingMessage);
 					const conversationMessage = this.toolOutputEnabled
 						? {
-								...this.streamingMessage,
-								content: this.streamingMessage.content.filter((content) => content.type !== "toolCall"),
+								...groupedMessage,
+								content: groupedMessage.content.filter((content) => content.type !== "toolCall"),
 							}
-						: this.streamingMessage;
+						: groupedMessage;
+					this.streamingComponent.setTimestampDividerEnabled(
+						this.streamingThinkingSections === 0 || !this.hiddenThinkingLabel.trim(),
+					);
 					this.streamingComponent.updateContent(conversationMessage, true);
 
 					for (const content of this.streamingMessage.content) {
@@ -4182,12 +4226,16 @@ export class InteractiveMode {
 								: "Operation aborted";
 						this.streamingMessage.errorMessage = errorMessage;
 					}
+					const groupedMessage = this.updateStreamingThinking(this.streamingMessage);
 					const conversationMessage = this.toolOutputEnabled
 						? {
-								...this.streamingMessage,
-								content: this.streamingMessage.content.filter((content) => content.type !== "toolCall"),
+								...groupedMessage,
+								content: groupedMessage.content.filter((content) => content.type !== "toolCall"),
 							}
-						: this.streamingMessage;
+						: groupedMessage;
+					this.streamingComponent.setTimestampDividerEnabled(
+						this.streamingThinkingSections === 0 || !this.hiddenThinkingLabel.trim(),
+					);
 					this.streamingComponent.updateContent(conversationMessage, false);
 
 					if (this.streamingMessage.stopReason === "aborted" || this.streamingMessage.stopReason === "error") {
@@ -4437,6 +4485,7 @@ export class InteractiveMode {
 
 	/** Show a managed-tool status update in the chat. */
 	private showManagedToolStatus(status: ToolStatus): void {
+		this.closeThinkingGroup();
 		if (!this.managedToolStatusStarted) {
 			this.chatContainer.addChild(new Spacer(1));
 			this.managedToolStatusStarted = true;
@@ -4456,6 +4505,7 @@ export class InteractiveMode {
 	 * we update the previous status line instead of appending new ones to avoid log spam.
 	 */
 	private showStatus(message: string): void {
+		this.closeThinkingGroup();
 		const children = this.chatContainer.children;
 		const last = children.length > 0 ? children[children.length - 1] : undefined;
 		const secondLast = children.length > 1 ? children[children.length - 2] : undefined;
@@ -4493,6 +4543,7 @@ export class InteractiveMode {
 			return;
 		}
 
+		this.closeThinkingGroup();
 		if (this.streamingComponent) {
 			const streamingIndex = this.chatContainer.children.indexOf(this.streamingComponent);
 			if (streamingIndex >= 0) {
@@ -4501,13 +4552,148 @@ export class InteractiveMode {
 			}
 		}
 
+		this.closeThinkingGroup();
 		this.chatContainer.addChild(component);
+	}
+
+	private closeThinkingGroup(): void {
+		if (!this.openThinkingGroup) return;
+		const closedGroup = this.thinkingTracker.noteEntry({ kind: "other" });
+		if (closedGroup) this.thinkingGroupComponents.get(closedGroup)?.setGroup(closedGroup);
+		this.openThinkingGroup = undefined;
+	}
+
+	private addThinkingSection(section: string, timestamp: number): void {
+		const group = this.thinkingTracker.noteEntry({ kind: "thinking", sections: [section] });
+		if (!group) return;
+		this.openThinkingGroup = group;
+		const component = this.thinkingGroupComponents.get(group);
+		if (component) {
+			component.setGroup(group);
+			return;
+		}
+		const groupComponent = new ThinkingGroupComponent(
+			group,
+			this.hiddenThinkingLabel,
+			this.hideThinkingBlock,
+			timestamp,
+			this.outputPad,
+		);
+		this.thinkingGroupComponents.set(group, groupComponent);
+		this.chatContainer.addChild(groupComponent);
+		if (this.streamingComponent) {
+			const groupIndex = this.chatContainer.children.indexOf(groupComponent);
+			const streamIndex = this.chatContainer.children.indexOf(this.streamingComponent);
+			if (groupIndex > streamIndex) {
+				this.chatContainer.children.splice(groupIndex, 1);
+				this.chatContainer.children.splice(streamIndex, 0, groupComponent);
+			}
+		}
+	}
+
+	private updateStreamingThinking(message: AssistantMessage): AssistantMessage {
+		const thinkingContents = message.content.filter((content) => content.type === "thinking");
+		const sections = thinkingContents.map((content) => content.thinking.trim()).filter(Boolean);
+		const joined = sections.join("\n\n");
+		if (sections.length === 0) {
+			const hasVisibleText = message.content.some(
+				(content) => content.type !== "thinking" && content.type !== "toolCall",
+			);
+			const hasToolCalls = message.content.some((content) => content.type === "toolCall");
+			const hasVisibleFailure =
+				message.stopReason === "length" ||
+				((message.stopReason === "error" || message.stopReason === "aborted") && !hasToolCalls);
+			if (hasVisibleText || hasVisibleFailure) this.closeThinkingGroup();
+			return message;
+		}
+		if (this.streamingThinkingSections === 0) this.addThinkingSection(joined, message.timestamp);
+		else {
+			const group = this.thinkingTracker.updateLatestSection(joined);
+			if (group) this.thinkingGroupComponents.get(group)?.setGroup(group);
+		}
+		this.streamingThinkingSections = sections.length;
+		if (this.streamingComponent) {
+			this.streamingComponent.setTimestampDividerEnabled(!this.hiddenThinkingLabel.trim());
+			this.thinkingMergedMessageComponents.add(this.streamingComponent);
+		}
+		const hasVisibleText = message.content.some(
+			(content) => content.type !== "thinking" && content.type !== "toolCall",
+		);
+		const hasToolCalls = message.content.some((content) => content.type === "toolCall");
+		const hasVisibleFailure =
+			message.stopReason === "length" ||
+			((message.stopReason === "error" || message.stopReason === "aborted") && !hasToolCalls);
+		if (hasVisibleText || hasVisibleFailure) this.closeThinkingGroup();
+		return { ...message, content: message.content.filter((content) => content.type !== "thinking") };
+	}
+
+	private addAssistantMessageToChat(
+		message: AssistantMessage,
+		options?: { populateHistory?: boolean; messageId?: string; timestamp?: string },
+	): void {
+		let segment: AssistantMessage["content"] = [];
+		let hasThinking = false;
+		const flushContent = (last: boolean) => {
+			if (segment.length === 0 && !last) return;
+			const content = segment;
+			segment = [];
+			const component = new AssistantMessageComponent(
+				{ ...message, content, stopReason: last ? message.stopReason : "stop" },
+				this.hideThinkingBlock,
+				this.getMarkdownThemeWithSettings(),
+				this.hiddenThinkingLabel,
+				this.outputPad,
+				this.getMarkdownTransformers(),
+				options?.messageId,
+				options?.timestamp,
+			);
+			if (hasThinking) {
+				component.setTimestampDividerEnabled(!this.hiddenThinkingLabel.trim());
+				this.thinkingMergedMessageComponents.add(component);
+			}
+			this.chatContainer.addChild(component);
+		};
+		for (let index = 0; index < message.content.length; index++) {
+			const content = message.content[index];
+			if (content.type === "thinking") {
+				if (segment.length > 0) {
+					this.closeThinkingGroup();
+					flushContent(false);
+				}
+				const sections: string[] = [];
+				while (index < message.content.length && message.content[index].type === "thinking") {
+					const thinking = message.content[index++];
+					if (thinking.type === "thinking" && thinking.thinking.trim()) sections.push(thinking.thinking.trim());
+				}
+				index--;
+				if (sections.length > 0) {
+					this.addThinkingSection(sections.join("\n\n"), message.timestamp);
+					hasThinking = true;
+				}
+			} else {
+				if (content.type === "toolCall" && !this.toolOutputEnabled) this.closeThinkingGroup();
+				else if (content.type === "text" && content.text.trim()) this.closeThinkingGroup();
+				segment.push(content);
+			}
+		}
+		const hasToolCalls = message.content.some((content) => content.type === "toolCall");
+		if (
+			message.stopReason === "length" ||
+			((message.stopReason === "error" || message.stopReason === "aborted") && !hasToolCalls)
+		) {
+			this.closeThinkingGroup();
+		}
+		flushContent(true);
 	}
 
 	private addMessageToChat(
 		message: AgentMessage,
 		options?: { populateHistory?: boolean; messageId?: string; timestamp?: string },
 	): void {
+		if (message.role === "assistant") {
+			this.addAssistantMessageToChat(message, options);
+			return;
+		}
 		switch (message.role) {
 			case "bashExecution": {
 				const component = new BashExecutionComponent(
@@ -4526,7 +4712,10 @@ export class InteractiveMode {
 					message.fullOutputPath,
 				);
 				if (this.toolOutputEnabled) this.addToolExecutionComponent(component);
-				else this.chatContainer.addChild(component);
+				else {
+					this.closeThinkingGroup();
+					this.chatContainer.addChild(component);
+				}
 				break;
 			}
 			case "custom": {
@@ -4543,11 +4732,15 @@ export class InteractiveMode {
 					);
 					component.setExpanded(this.toolOutputExpanded);
 					if (TOOL_OUTPUT_CUSTOM_TYPES.has(message.customType)) this.addToolExecutionComponent(component);
-					else this.chatContainer.addChild(component);
+					else {
+						this.closeThinkingGroup();
+						this.chatContainer.addChild(component);
+					}
 				}
 				break;
 			}
 			case "compactionSummary": {
+				this.closeThinkingGroup();
 				this.chatContainer.addChild(new Spacer(1));
 				const component = new CompactionSummaryMessageComponent(
 					message,
@@ -4562,6 +4755,7 @@ export class InteractiveMode {
 				break;
 			}
 			case "branchSummary": {
+				this.closeThinkingGroup();
 				this.chatContainer.addChild(new Spacer(1));
 				const component = new BranchSummaryMessageComponent(
 					message,
@@ -4580,6 +4774,7 @@ export class InteractiveMode {
 			case "user": {
 				const textContent = this.getUserMessageText(message);
 				if (textContent) {
+					this.closeThinkingGroup();
 					if (this.chatContainer.children.length > 0) {
 						this.chatContainer.addChild(new Spacer(1));
 					}
@@ -4627,20 +4822,6 @@ export class InteractiveMode {
 				}
 				break;
 			}
-			case "assistant": {
-				const assistantComponent = new AssistantMessageComponent(
-					message,
-					this.hideThinkingBlock,
-					this.getMarkdownThemeWithSettings(),
-					this.hiddenThinkingLabel,
-					this.outputPad,
-					this.getMarkdownTransformers(),
-					options?.messageId,
-					options?.timestamp,
-				);
-				this.chatContainer.addChild(assistantComponent);
-				break;
-			}
 			case "toolResult": {
 				// Tool results are rendered inline with tool calls, handled separately
 				break;
@@ -4651,11 +4832,19 @@ export class InteractiveMode {
 		}
 	}
 
+	private resetThinkingTracking(): void {
+		this.thinkingTracker.clear();
+		this.thinkingGroupComponents.clear();
+		this.thinkingMergedMessageComponents.clear();
+		this.openThinkingGroup = undefined;
+	}
+
 	private renderSessionItems(
 		items: readonly RenderSessionItem[],
 		messageMeta?: Map<AgentMessage, { id: string; timestamp: string }>,
 		options: { updateFooter?: boolean; populateHistory?: boolean } = {},
 	): void {
+		this.resetThinkingTracking();
 		this.pendingTools.clear();
 		const renderedPendingTools = new Map<string, ToolExecutionComponent>();
 		// Cache misses are not persisted, unlike successful cache-warming usage.
@@ -4797,6 +4986,7 @@ export class InteractiveMode {
 
 	private addCacheWarmingUsage(entry: UsageEntry): void {
 		if (!this.settingsManager.getShowCacheMissNotices()) return;
+		this.closeThinkingGroup();
 		// Back-to-back warms collapse into one line with the cumulative cost.
 		const previous = this.cacheWarmingNotice;
 		if (previous && this.chatContainer.children.at(-1) === previous.component && previous.note === entry.note) {
@@ -4817,6 +5007,7 @@ export class InteractiveMode {
 	 */
 	private addCompactionCostNotice(notice: CompactionCostNotice): void {
 		if (!this.settingsManager.getShowCacheMissNotices()) return;
+		this.closeThinkingGroup();
 
 		const { usage } = notice;
 		const tokens = usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
@@ -4889,6 +5080,7 @@ export class InteractiveMode {
 
 	private addCacheMissNotice(miss: CacheMiss): void {
 		if (miss.missedTokens < 20_000 && miss.missedCost < 0.1) return;
+		this.closeThinkingGroup();
 
 		const cost = miss.missedCost >= 0.01 ? ` (~$${miss.missedCost.toFixed(2)})` : "";
 		const reBilled = `${formatTokens(miss.missedTokens)} tokens re-billed${cost}`;
@@ -5281,6 +5473,9 @@ export class InteractiveMode {
 
 	/** Update rendered assistant messages without rebuilding live tool components. */
 	private updateThinkingBlockVisibility(): void {
+		for (const component of this.thinkingGroupComponents.values()) {
+			component.setHideThinkingBlock(this.hideThinkingBlock);
+		}
 		for (const container of [this.chatContainer, this.toolOutputContainer]) {
 			for (const child of container.children) {
 				if (child instanceof AssistantMessageComponent) {
@@ -5328,12 +5523,14 @@ export class InteractiveMode {
 	}
 
 	showError(errorMessage: string): void {
+		this.closeThinkingGroup();
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new ThemedText(() => theme.fg("error", `Error: ${errorMessage}`), this.outputPad, 0));
 		this.ui.requestRender();
 	}
 
 	showWarning(warningMessage: string): void {
+		this.closeThinkingGroup();
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new ThemedText(() => theme.fg("warning", `Warning: ${warningMessage}`), 1, 0));
 		this.ui.requestRender();
@@ -7653,6 +7850,7 @@ export class InteractiveMode {
 		}
 		this.chatContainer.clear();
 		this.toolOutputContainer.clear();
+		this.resetThinkingTracking();
 		this.ui.requestRender();
 	}
 

@@ -28,6 +28,7 @@ describe("issue #7829 invalid settings warning", () => {
 				init: vi.fn(async () => {}),
 				options: { startupDiagnostics },
 				chatContainer,
+				closeThinkingGroup: vi.fn(),
 				outputPad: 1,
 				ui: { requestRender: vi.fn() },
 				version: "test",

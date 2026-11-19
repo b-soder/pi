@@ -42,6 +42,7 @@ export class AssistantMessageComponent extends Container {
 	private isStreaming = false;
 	private messageId?: string;
 	private timestamp?: string;
+	private timestampDividerEnabled = true;
 	private thinkingVisibilityOverrides = new Map<number, boolean>();
 	private markdownSlots: MarkdownSlot[] = [];
 
@@ -94,6 +95,11 @@ export class AssistantMessageComponent extends Container {
 		if (this.lastMessage) {
 			this.updateContent(this.lastMessage);
 		}
+	}
+
+	setTimestampDividerEnabled(enabled: boolean): void {
+		this.timestampDividerEnabled = enabled;
+		if (this.lastMessage) this.updateContent(this.lastMessage);
 	}
 
 	setOutputPad(padding: number): void {
@@ -261,7 +267,9 @@ export class AssistantMessageComponent extends Container {
 			}
 		}
 		this.clear();
-		if (this.contentContainer.children.length > 0) this.addChild(this.timestampDivider);
+		if (this.timestampDividerEnabled && this.contentContainer.children.length > 0) {
+			this.addChild(this.timestampDivider);
+		}
 		this.addChild(this.contentContainer);
 	}
 }

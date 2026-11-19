@@ -54,6 +54,7 @@ describe("message timestamp dividers", () => {
 	test("user replay uses message time rather than entry or render time; tool results add nothing", () => {
 		const context = {
 			chatContainer: new Container(),
+			closeThinkingGroup: () => {},
 			outputPad: 1,
 			getUserMessageText: () => "hello",
 			getMarkdownThemeWithSettings: getMarkdownTheme,
