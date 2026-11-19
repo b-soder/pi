@@ -12,7 +12,7 @@ type ClearOutputContext = {
 	session: Activity;
 	chatContainer: { clear: () => void };
 	toolOutputContainer: { clear: () => void };
-	resetThinkingTracking: () => void;
+	conversationLog: { reset: () => void };
 	ui: { requestRender: () => void };
 	showError: (message: string) => void;
 };
@@ -26,7 +26,7 @@ function makeContext(session: Activity): ClearOutputContext {
 		session,
 		chatContainer: { clear: vi.fn() },
 		toolOutputContainer: { clear: vi.fn() },
-		resetThinkingTracking: vi.fn(),
+		conversationLog: { reset: vi.fn() },
 		ui: { requestRender: vi.fn() },
 		showError: vi.fn(),
 	};

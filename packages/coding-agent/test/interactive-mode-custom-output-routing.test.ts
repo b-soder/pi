@@ -8,7 +8,6 @@ import { createCustomMessage } from "../src/core/messages.ts";
 import { type SessionEntry, SessionManager } from "../src/core/session-manager.ts";
 import { CustomEntryComponent } from "../src/modes/interactive/components/custom-entry.ts";
 import { CustomMessageComponent } from "../src/modes/interactive/components/custom-message.ts";
-import { ConversationThinkingTracker } from "../src/modes/interactive/components/thinking-groups.ts";
 import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 import { getMarkdownTheme, initTheme } from "../src/modes/interactive/theme/theme.ts";
@@ -48,10 +47,11 @@ function makeMode(fourPanel: boolean, entryRenderer?: EntryRenderer, messageRend
 		chatContainer: new Container(),
 		toolOutputContainer: new Container(),
 		pendingTools: new Map(),
-		thinkingTracker: new ConversationThinkingTracker(),
-		thinkingGroupComponents: new Map(),
-		thinkingMergedMessageComponents: new Set(),
-		openThinkingGroup: undefined,
+		conversationLog: {
+			reset: vi.fn(),
+			closeThinkingGroup: vi.fn(),
+			addAssistantMessage: vi.fn(),
+		},
 		entriesRenderedByBoundaryCompaction: new Set(),
 		isInitialized: true,
 		footer: { invalidate: vi.fn() },

@@ -1,13 +1,10 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { TuiMouseEvent } from "@earendil-works/pi-tui";
-import { Container } from "@earendil-works/pi-tui";
 import { describe, expect, test } from "vitest";
+import { AssistantMessageComponent } from "../src/modes/interactive/components/assistant-message.ts";
+import { ConversationLog } from "../src/modes/interactive/components/conversation-log.ts";
 import { ThinkingGroupComponent } from "../src/modes/interactive/components/thinking-group.ts";
-import {
-	ConversationThinkingTracker,
-	type ThinkingGroup,
-} from "../src/modes/interactive/components/thinking-groups.ts";
-import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
+import type { ThinkingGroup } from "../src/modes/interactive/components/thinking-groups.ts";
 import { getMarkdownTheme, initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../src/utils/ansi.ts";
 
@@ -32,6 +29,17 @@ function clickText(component: ThinkingGroupComponent, text: string): void {
 		clickCount: 1,
 	};
 	component.handleMouse(event);
+}
+
+function createConversationLog(): ConversationLog {
+	return new ConversationLog({
+		getHideThinkingBlock: () => false,
+		getHiddenThinkingLabel: () => "Thinking...",
+		getOutputPad: () => 1,
+		getToolOutputEnabled: () => true,
+		getMarkdownTheme,
+		getMarkdownTransformers: () => [],
+	});
 }
 
 function createAssistantMessage(content: AssistantMessage["content"]): AssistantMessage {
@@ -117,59 +125,34 @@ describe("ThinkingGroupComponent", () => {
 
 	test("streaming updates replace the latest section in place", () => {
 		initTheme("dark");
-		const chatContainer = new Container();
-		const mode = Object.assign(Object.create(InteractiveMode.prototype), {
-			chatContainer,
-			thinkingTracker: new ConversationThinkingTracker(),
-			thinkingGroupComponents: new Map(),
-			thinkingMergedMessageComponents: new Set(),
-			openThinkingGroup: undefined,
-			streamingThinkingSections: 0,
-			hideThinkingBlock: false,
-			hiddenThinkingLabel: "Thinking...",
-			outputPad: 1,
-			toolOutputEnabled: true,
-		});
-		const update = Reflect.get(InteractiveMode.prototype, "updateStreamingThinking") as (
-			this: unknown,
-			message: AssistantMessage,
-		) => AssistantMessage;
-		update.call(mode, createAssistantMessage([{ type: "thinking", thinking: "partial reasoning" }]));
-		update.call(mode, createAssistantMessage([{ type: "thinking", thinking: "completed reasoning" }]));
-		const rendered = stripAnsi(chatContainer.render(80).join("\n"));
+		const log = createConversationLog();
+		const streaming = new AssistantMessageComponent(undefined, false, getMarkdownTheme(), "Thinking...", 1, []);
+		log.startStreamingMessage(streaming);
+		log.updateStreamingThinking(
+			createAssistantMessage([{ type: "thinking", thinking: "partial reasoning" }]),
+			streaming,
+		);
+		log.updateStreamingThinking(
+			createAssistantMessage([{ type: "thinking", thinking: "completed reasoning" }]),
+			streaming,
+		);
+		const rendered = stripAnsi(log.container.render(80).join("\n"));
 		expect(rendered).toContain("completed reasoning");
 		expect(rendered).not.toContain("partial reasoning");
 	});
 
 	test("interactive append groups thinking across tool-log-only messages and closes on assistant text", () => {
 		initTheme("dark");
-		const chatContainer = new Container();
-		const mode = Object.assign(Object.create(InteractiveMode.prototype), {
-			chatContainer,
-			thinkingTracker: new ConversationThinkingTracker(),
-			thinkingGroupComponents: new Map(),
-			thinkingMergedMessageComponents: new Set(),
-			openThinkingGroup: undefined,
-			hideThinkingBlock: false,
-			hiddenThinkingLabel: "Thinking...",
-			outputPad: 1,
-			toolOutputEnabled: true,
-			getMarkdownThemeWithSettings: getMarkdownTheme,
-			getMarkdownTransformers: () => [],
-		});
-		const append = Reflect.get(InteractiveMode.prototype, "addAssistantMessageToChat") as (
-			this: unknown,
-			message: AssistantMessage,
-		) => void;
-		append.call(mode, createAssistantMessage([{ type: "thinking", thinking: "first reasoning" }]));
+		const log = createConversationLog();
+		log.addAssistantMessage(createAssistantMessage([{ type: "thinking", thinking: "first reasoning" }]));
 		// Tool calls/results in the separate tool panel do not invoke the conversation append hook.
-		append.call(mode, createAssistantMessage([{ type: "thinking", thinking: "latest reasoning" }]));
-		let rendered = stripAnsi(chatContainer.render(80).join("\n"));
+		log.addAssistantMessage(createAssistantMessage([{ type: "thinking", thinking: "latest reasoning" }]));
+		let rendered = stripAnsi(log.container.render(80).join("\n"));
 		expect(rendered).toContain("Thinking... (1 earlier)");
 		expect(rendered).toContain("latest reasoning");
 		expect(rendered).not.toContain("first reasoning");
-		append.call(mode, createAssistantMessage([{ type: "text", text: "answer" }]));
-		rendered = stripAnsi(chatContainer.render(80).join("\n"));
+		log.addAssistantMessage(createAssistantMessage([{ type: "text", text: "answer" }]));
+		rendered = stripAnsi(log.container.render(80).join("\n"));
 		expect(rendered).toContain("Thinking... (2)");
 		expect(rendered).toContain("answer");
 		expect(rendered).not.toContain("latest reasoning");

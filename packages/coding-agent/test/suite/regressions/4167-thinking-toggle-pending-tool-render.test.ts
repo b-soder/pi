@@ -4,7 +4,6 @@ import { Container, Text, type TUI } from "@earendil-works/pi-tui";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import type { AgentSessionEvent } from "../../../src/core/agent-session.ts";
 import type { SessionEntry } from "../../../src/core/session-manager.ts";
-import { ConversationThinkingTracker } from "../../../src/modes/interactive/components/thinking-groups.ts";
 import type { ToolExecutionComponent } from "../../../src/modes/interactive/components/tool-execution.ts";
 import { InteractiveMode } from "../../../src/modes/interactive/interactive-mode.ts";
 import { initTheme } from "../../../src/modes/interactive/theme/theme.ts";
@@ -36,11 +35,7 @@ type RenderSessionItems = (
 
 type RenderSessionContextThis = {
 	pendingTools: Map<string, ToolExecutionComponent>;
-	thinkingTracker: ConversationThinkingTracker;
-	thinkingGroupComponents: Map<unknown, unknown>;
-	thinkingMergedMessageComponents: Set<unknown>;
-	openThinkingGroup: undefined;
-	resetThinkingTracking(): void;
+	conversationLog: { reset(): void };
 	chatContainer: Container;
 	toolOutputContainer: Container;
 	toolOutputEnabled: boolean;
@@ -57,7 +52,6 @@ type RenderSessionContextThis = {
 	toolOutputExpanded: boolean;
 	isInitialized: boolean;
 	updateEditorBorderColor(): void;
-	closeThinkingGroup(): void;
 	getRegisteredToolDefinition(toolName: string): undefined;
 	maybeShowAssistantDiagnostics(message: AssistantMessage): void;
 	addMessageToChat(message: AgentMessage, options?: { populateHistory?: boolean }): void;
@@ -77,13 +71,7 @@ function createFakeInteractiveModeThis(): RenderSessionContextThis {
 	const chatContainer = new Container();
 	return {
 		pendingTools: new Map<string, ToolExecutionComponent>(),
-		thinkingTracker: new ConversationThinkingTracker(),
-		thinkingGroupComponents: new Map(),
-		thinkingMergedMessageComponents: new Set(),
-		openThinkingGroup: undefined,
-		resetThinkingTracking: (
-			InteractiveMode.prototype as unknown as { resetThinkingTracking(this: RenderSessionContextThis): void }
-		).resetThinkingTracking,
+		conversationLog: { reset: vi.fn() },
 		chatContainer,
 		toolOutputContainer: new Container(),
 		toolOutputEnabled: false,
@@ -100,7 +88,6 @@ function createFakeInteractiveModeThis(): RenderSessionContextThis {
 		toolOutputExpanded: false,
 		isInitialized: true,
 		updateEditorBorderColor: vi.fn(),
-		closeThinkingGroup: vi.fn(),
 		getRegisteredToolDefinition: (_toolName: string) => undefined,
 		maybeShowAssistantDiagnostics: vi.fn(),
 		addToolExecutionComponent: (

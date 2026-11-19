@@ -82,7 +82,7 @@ describe("InteractiveMode.showStatus", () => {
 		const fakeThis: any = {
 			chatContainer: new Container(),
 			ui: { requestRender: vi.fn() },
-			closeThinkingGroup: vi.fn(),
+			conversationLog: { closeThinkingGroup: vi.fn() },
 			lastStatusSpacer: undefined,
 			lastStatusText: undefined,
 		};
@@ -102,7 +102,7 @@ describe("InteractiveMode.showStatus", () => {
 		const fakeThis: any = {
 			chatContainer: new Container(),
 			ui: { requestRender: vi.fn() },
-			closeThinkingGroup: vi.fn(),
+			conversationLog: { closeThinkingGroup: vi.fn() },
 			lastStatusSpacer: undefined,
 			lastStatusText: undefined,
 		};
@@ -128,7 +128,6 @@ describe("InteractiveMode.showManagedToolStatus", () => {
 		const fakeThis: any = {
 			chatContainer: new Container(),
 			ui: { requestRender: vi.fn() },
-			closeThinkingGroup: vi.fn(),
 			managedToolStatusStarted: false,
 			lastStatusSpacer: undefined,
 			lastStatusText: undefined,

@@ -6,7 +6,7 @@ import { initTheme } from "../../../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../../../src/utils/ansi.ts";
 
 type UpdateThinkingBlockVisibility = (this: {
-	thinkingGroupComponents: Map<unknown, { setHideThinkingBlock(hidden: boolean): void }>;
+	conversationLog: { setHideThinkingBlock(hidden: boolean): void };
 	chatContainer: Container;
 	toolOutputContainer: Container;
 	ui: TUI;
@@ -55,7 +55,7 @@ describe("thinking visibility while a bash tool is running (#8611)", () => {
 		const fakeThis = {
 			hideThinkingBlock: false,
 			settingsManager: { setHideThinkingBlock: vi.fn() },
-			thinkingGroupComponents: new Map(),
+			conversationLog: { setHideThinkingBlock: vi.fn() },
 			chatContainer,
 			toolOutputContainer: new Container(),
 			ui,
