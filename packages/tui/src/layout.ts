@@ -33,12 +33,17 @@ export interface LayoutBox {
 	layer: number;
 }
 
+/** Component output by width, as rendered for one layout frame. */
+export type LayoutRenderCache = Map<Component, Map<number, readonly string[]>>;
+
 export interface LayoutFrame {
 	root: LayoutBox;
 	width: number;
 	height: number;
 	lines: string[];
 	primaryScrollView?: ScrollView;
+	/** Output of every component this frame rendered; pass it to a later frame whose content did not change. */
+	renderCache: LayoutRenderCache;
 }
 
 export interface ScrollbarGeometry {
@@ -52,7 +57,9 @@ export interface ScrollbarGeometry {
 
 interface LayoutContext {
 	viewport: { width: number; height: number };
-	renderCache: Map<Component, Map<number, string[]>>;
+	renderCache: LayoutRenderCache;
+	/** Output of an earlier frame with the same content; entries are copied into `renderCache` when used. */
+	reusableOutput: LayoutRenderCache | undefined;
 	requestRender: () => void;
 	primaryScrollView: ScrollView | undefined;
 }
@@ -65,16 +72,16 @@ function intersect(a: LayoutRect, b: LayoutRect): LayoutRect {
 	return { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) };
 }
 
-function renderCached(context: LayoutContext, component: Component, width: number): string[] {
+function renderCached(context: LayoutContext, component: Component, width: number): readonly string[] {
 	const safeWidth = Math.max(1, Math.floor(width));
 	let widths = context.renderCache.get(component);
 	if (!widths) {
-		widths = new Map<number, string[]>();
+		widths = new Map<number, readonly string[]>();
 		context.renderCache.set(component, widths);
 	}
 	let lines = widths.get(safeWidth);
 	if (!lines) {
-		lines = component.render(safeWidth);
+		lines = context.reusableOutput?.get(component)?.get(safeWidth) ?? component.render(safeWidth);
 		widths.set(safeWidth, lines);
 	}
 	return lines;
@@ -381,21 +388,34 @@ function paintBox(box: LayoutBox, screen: string[], totalWidth: number): void {
 	paintScrollbar(box, screen, totalWidth);
 }
 
+/**
+ * Lay out and paint one frame.
+ *
+ * `reusableOutput` is an earlier frame's `renderCache`; its output is used instead of calling
+ * `render()`. Pass it only when no component changed since that frame, e.g. when only a scroll
+ * position moved: the frame then costs O(viewport) instead of re-rendering the whole scrollable
+ * document. Each frame keeps only the output it used, so reuse never accumulates across frames.
+ */
 export function renderLayoutFrame(
 	root: Component,
 	width: number,
 	height: number,
 	requestRender: () => void,
-	inset = 0,
+	insetOrReusableOutput: number | LayoutRenderCache = 0,
+	reusableOutput?: LayoutRenderCache,
 ): LayoutFrame {
+	const inset = typeof insetOrReusableOutput === "number" ? insetOrReusableOutput : 0;
+	const previousOutput = typeof insetOrReusableOutput === "number" ? reusableOutput : insetOrReusableOutput;
 	const safeWidth = Math.max(1, Math.floor(width));
 	const safeHeight = Math.max(1, Math.floor(height));
 	const safeInset = Math.max(0, Math.floor(inset));
 	const contentWidth = Math.max(1, safeWidth - safeInset * 2);
 	const contentHeight = Math.max(1, safeHeight - safeInset * 2);
+	const renderCache: LayoutRenderCache = new Map();
 	const context: LayoutContext = {
 		viewport: { width: contentWidth, height: contentHeight },
-		renderCache: new Map(),
+		renderCache,
+		reusableOutput: previousOutput,
 		requestRender,
 		primaryScrollView: undefined,
 	};
@@ -413,6 +433,7 @@ export function renderLayoutFrame(
 		height: safeHeight,
 		lines,
 		...(context.primaryScrollView === undefined ? {} : { primaryScrollView: context.primaryScrollView }),
+		renderCache,
 	};
 }
 

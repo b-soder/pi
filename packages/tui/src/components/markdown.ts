@@ -400,7 +400,7 @@ export class Markdown implements Component {
 		return joiners[row];
 	}
 
-	render(width: number): string[] {
+	render(width: number): readonly string[] {
 		// Check cache
 		if (this.cachedLines && this.cachedText === this.text && this.cachedWidth === width) {
 			return this.cachedLines;
@@ -500,7 +500,10 @@ export class Markdown implements Component {
 		const rightMargin = " ".repeat(this.paddingX);
 		const bgFn = this.defaultTextStyle?.bgColor;
 		const lines: string[] = [];
-		const selectionLines = this.renderToken(token, contentWidth, nextTokenType);
+		// Image lines skip wrapping, so split them here: hard breaks after an image must stay separate rows.
+		const selectionLines = this.renderToken(token, contentWidth, nextTokenType).flatMap((line) =>
+			isImageLine(line) ? line.split("\n") : [line],
+		);
 		block.selectionLines = selectionLines;
 		for (const line of selectionLines) {
 			if (isImageLine(line)) {

@@ -7,7 +7,7 @@ import { type Component, Text, truncateToWidth } from "@earendil-works/pi-tui";
 
 export interface VisualTruncateResult {
 	/** The visual lines to display */
-	visualLines: string[];
+	visualLines: readonly string[];
 	/** Number of visual lines that were skipped (hidden) */
 	skippedCount: number;
 }
@@ -69,7 +69,7 @@ export interface VisualLinePreviewOptions {
 export class VisualLinePreview implements Component {
 	private options: VisualLinePreviewOptions;
 	private cachedWidth: number | undefined;
-	private cachedLines: string[] | undefined;
+	private cachedLines: readonly string[] | undefined;
 
 	constructor(options: VisualLinePreviewOptions) {
 		this.options = options;
@@ -86,7 +86,7 @@ export class VisualLinePreview implements Component {
 		return text.getSelectionJoinerAfterRow(row, width);
 	}
 
-	render(width: number): string[] {
+	render(width: number): readonly string[] {
 		if (this.cachedLines === undefined || this.cachedWidth !== width) {
 			const { text, maxVisualLines, keep, formatHint } = this.options;
 			const preview = truncateToVisualLines(text, maxVisualLines, width, 0, keep);

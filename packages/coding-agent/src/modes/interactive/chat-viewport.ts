@@ -53,7 +53,7 @@ class DividerStatus {
 		this.getStatus = getStatus;
 	}
 
-	render(width: number): string[] {
+	render(width: number): readonly string[] {
 		const text = this.getStatus(width);
 		if (text === undefined) return [];
 		const cached = this.cache.get(width);
@@ -89,7 +89,7 @@ class PanelDivider implements Component {
 		this.getRightLabel = getRightLabel;
 	}
 
-	render(width: number): string[] {
+	render(width: number): readonly string[] {
 		const safeWidth = Math.max(1, width);
 		const label = this.getRightLabel?.(safeWidth);
 		const suffix = label && visibleWidth(label) + 2 < safeWidth ? ` ${label} ` : "";
